@@ -1,0 +1,371 @@
+/* 下载页面样式 - 可以添加到您的全局CSS或创建一个单独的CSS文件 */
+
+.download-page {
+  min-height: calc(100vh - 70px - 60px); /* 减去导航栏和页脚的高度 */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1rem;
+  margin-top: 70px;
+  background-color: #f8f9fa;
+}
+
+.download-container {
+  width: 100%;
+  max-width: 600px;
+  background-color: white;
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+  padding: 2rem;
+  margin-bottom: 2rem;
+}
+
+.file-download-header {
+  text-align: center;
+  margin-bottom: 2rem;
+}
+
+.lock-icon {
+  color: #4a86e8;
+  margin-bottom: 1rem;
+}
+
+.file-download-header h1 {
+  font-size: 1.8rem;
+  margin-bottom: 0.5rem;
+  color: #2c3e50;
+}
+
+.subtitle {
+  color: #6c757d;
+  margin-bottom: 1.5rem;
+}
+
+.file-info-card {
+  background-color: #f8f9fa;
+  border-radius: 6px;
+  overflow: hidden;
+  margin-bottom: 2rem;
+  border: 1px solid #e9ecef;
+}
+
+.file-info-header {
+  background-color: #e9ecef;
+  padding: 0.75rem 1rem;
+  font-weight: 600;
+  color: #495057;
+}
+
+.file-info-content {
+  padding: 1rem;
+}
+
+.file-info-item {
+  display: flex;
+  margin-bottom: 0.5rem;
+  font-size: 0.95rem;
+}
+
+.file-info-item:last-child {
+  margin-bottom: 0;
+}
+
+.file-info-item .label {
+  min-width: 80px;
+  font-weight: 500;
+  color: #495057;
+}
+
+.file-info-item .value {
+  color: #212529;
+  word-break: break-all;
+}
+
+.decrypt-section {
+  margin-bottom: 2rem;
+}
+
+.decrypt-section h2 {
+  font-size: 1.4rem;
+  margin-bottom: 0.5rem;
+  color: #2c3e50;
+}
+
+.decrypt-instructions {
+  color: #6c757d;
+  margin-bottom: 1.5rem;
+}
+
+.password-input-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.password-input-wrapper {
+  position: relative;
+  width: 100%;
+}
+
+.password-input {
+  width: 100%;
+  padding: 0.8rem 3rem 0.8rem 1rem;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  font-size: 1rem;
+  transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+}
+
+.password-input:focus {
+  border-color: #4a86e8;
+  outline: 0;
+  box-shadow: 0 0 0 0.2rem rgba(74, 134, 232, 0.25);
+}
+
+.toggle-password {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: #6c757d;
+  cursor: pointer;
+  padding: 5px;
+}
+
+.toggle-password:hover {
+  color: #495057;
+}
+
+.decrypt-button {
+  padding: 0.8rem 1.5rem;
+  background-color: #4a86e8;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 500;
+}
+
+.decrypt-button:hover:not(:disabled) {
+  background-color: #3b78e7;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(74, 134, 232, 0.3);
+}
+
+.decrypt-button:disabled {
+  background-color: #a2b9e0;
+  cursor: not-allowed;
+}
+
+.spinner-small {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  border-top-color: white;
+  animation: spin 1s linear infinite;
+  margin-right: 8px;
+}
+
+.error-message {
+  display: flex;
+  align-items: center;
+  color: #dc3545;
+  background-color: #f8d7da;
+  border: 1px solid #f5c6cb;
+  border-radius: 4px;
+  padding: 0.75rem 1rem;
+  margin-top: 1rem;
+}
+
+.error-message svg {
+  margin-right: 8px;
+  color: #dc3545;
+}
+
+.security-note {
+  display: flex;
+  background-color: #e9f3fe;
+  border-radius: 6px;
+  padding: 1rem;
+}
+
+.security-note-icon {
+  margin-right: 1rem;
+  color: #4a86e8;
+  flex-shrink: 0;
+}
+
+.security-note-content h3 {
+  font-size: 1rem;
+  margin-bottom: 0.5rem;
+  color: #2c3e50;
+}
+
+.security-note-content ul {
+  margin: 0;
+  padding-left: 1.2rem;
+  font-size: 0.9rem;
+}
+
+.security-note-content li {
+  margin-bottom: 0.3rem;
+  color: #495057;
+}
+
+/* 加载状态 */
+.loading-state {
+  text-align: center;
+  padding: 3rem 1rem;
+}
+
+.loading-animation {
+  margin-bottom: 1.5rem;
+}
+
+.spinner {
+  display: inline-block;
+  width: 50px;
+  height: 50px;
+  border: 3px solid rgba(74, 134, 232, 0.3);
+  border-radius: 50%;
+  border-top-color: #4a86e8;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.loading-state h2 {
+  margin-bottom: 0.5rem;
+  color: #2c3e50;
+}
+
+.loading-state p {
+  color: #6c757d;
+}
+
+/* 错误状态 */
+.error-state {
+  text-align: center;
+  padding: 3rem 1rem;
+}
+
+.error-icon {
+  color: #dc3545;
+  margin-bottom: 1.5rem;
+}
+
+.error-state h2 {
+  margin-bottom: 1rem;
+  color: #2c3e50;
+}
+
+.error-state .error-message {
+  background: none;
+  border: none;
+  padding: 0;
+  margin-bottom: 1.5rem;
+  text-align: center;
+  justify-content: center;
+}
+
+.error-actions {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+}
+
+.primary-button {
+  padding: 0.6rem 1.2rem;
+  background-color: #4a86e8;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.primary-button:hover {
+  background-color: #3b78e7;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+}
+
+.secondary-button {
+  padding: 0.6rem 1.2rem;
+  background-color: transparent;
+  color: #6c757d;
+  border: 1px solid #6c757d;
+  border-radius: 4px;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.secondary-button:hover {
+  background-color: #f8f9fa;
+  color: #495057;
+}
+
+/* 成功状态 */
+.success-state {
+  text-align: center;
+  padding: 3rem 1rem;
+}
+
+.success-icon {
+  color: #28a745;
+  margin-bottom: 1.5rem;
+}
+
+.success-state h2 {
+  margin-bottom: 0.5rem;
+  color: #2c3e50;
+}
+
+.success-state p {
+  color: #6c757d;
+  margin-bottom: 1.5rem;
+}
+
+.file-success-details {
+  background-color: #f8f9fa;
+  border-radius: 6px;
+  padding: 1rem;
+  text-align: left;
+  margin-bottom: 1.5rem;
+}
+
+.file-success-details p {
+  margin: 0.5rem 0;
+  color: #495057;
+}
+
+/* 响应式设计 */
+@media (max-width: 640px) {
+  .download-container {
+    padding: 1.5rem;
+  }
+  
+  .file-download-header h1 {
+    font-size: 1.6rem;
+  }
+  
+  .password-input-container {
+    flex-direction: column;
+  }
+}
