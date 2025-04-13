@@ -128,21 +128,67 @@ const resolvers = {
         const filePath = path.join(UPLOAD_DIR, downloadId);
         console.log('Saving file to:', filePath);
         
-        // Create a write stream
-        const writeStream = fs.createWriteStream(filePath, { encoding: 'binary' });
+        // Create a write stream with proper binary handling
+        const writeStream = fs.createWriteStream(filePath, { 
+          encoding: 'binary',
+          flags: 'w'
+        });
         
-        // Pipe the file stream to the write stream
+        // Track the total bytes written
+        let totalBytesWritten = 0;
+        let writeError = null;
+        
+        // Pipe the file stream to the write stream with proper error handling
         await new Promise((resolve, reject) => {
-          createReadStream()
-            .pipe(writeStream)
-            .on('finish', () => {
-              console.log('File written successfully');
-              resolve();
-            })
-            .on('error', (error) => {
-              console.error('Error writing file:', error);
+          const readStream = createReadStream();
+          
+          readStream.on('data', (chunk) => {
+            try {
+              const writeSuccess = writeStream.write(chunk, 'binary');
+              if (!writeSuccess) {
+                readStream.pause();
+                writeStream.once('drain', () => {
+                  readStream.resume();
+                });
+              }
+              totalBytesWritten += chunk.length;
+              console.log('Chunk written:', {
+                size: chunk.length,
+                total: totalBytesWritten,
+                expected: size
+              });
+            } catch (error) {
+              writeError = error;
+              readStream.destroy();
+              writeStream.end();
               reject(error);
-            });
+            }
+          });
+          
+          readStream.on('end', () => {
+            if (!writeError) {
+              writeStream.end();
+              resolve();
+            }
+          });
+          
+          readStream.on('error', (error) => {
+            writeError = error;
+            writeStream.end();
+            reject(error);
+          });
+          
+          writeStream.on('error', (error) => {
+            writeError = error;
+            readStream.destroy();
+            reject(error);
+          });
+          
+          writeStream.on('finish', () => {
+            if (!writeError) {
+              resolve();
+            }
+          });
         });
         
         // Verify file was written
@@ -150,11 +196,44 @@ const resolvers = {
           throw new Error('File was not written to disk');
         }
         
+        // Wait a moment to ensure the file system has completed writing
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
         const stats = fs.statSync(filePath);
         console.log('File stats:', {
           size: stats.size,
-          exists: true
+          exists: true,
+          originalSize: size,
+          encryptedSize: stats.size,
+          expectedSize: size,
+          difference: Math.abs(stats.size - size),
+          bytesWritten: totalBytesWritten,
+          filePath: filePath,
+          writeComplete: totalBytesWritten === stats.size
         });
+        
+        // Verify file size matches the encrypted size
+        // AES-GCM overhead includes:
+        // - 16 bytes for IV
+        // - 16 bytes for salt
+        // - 16 bytes for authentication tag
+        // - Padding (up to 16 bytes)
+        const expectedEncryptedSize = size + 64; // Original size + maximum overhead
+        const sizeDifference = Math.abs(stats.size - expectedEncryptedSize);
+        const allowedDifference = Math.ceil(size * 0.1); // 10% tolerance for padding variations
+        
+        if (sizeDifference > allowedDifference) {
+          console.error('Size validation failed:', {
+            actualSize: stats.size,
+            expectedSize: expectedEncryptedSize,
+            difference: sizeDifference,
+            allowedDifference: allowedDifference,
+            originalSize: size,
+            percentageDifference: (sizeDifference / size * 100).toFixed(2) + '%',
+            padding: stats.size - size - 48 // Calculate actual padding used
+          });
+          throw new Error(`File size validation failed: expected ${expectedEncryptedSize} bytes, got ${stats.size} bytes (difference: ${sizeDifference}, ${(sizeDifference / size * 100).toFixed(2)}%)`);
+        }
         
         // Calculate expiration date
         const expiresAt = new Date(Date.now() + expiresIn * 1000);
@@ -240,12 +319,7 @@ app.use(graphqlUploadExpress({
 
 // Add file download endpoint
 app.get('/api/download/:downloadId', async (req, res) => {
-  // Set CORS headers for this specific endpoint
-  res.setHeader('Access-Control-Allow-Origin', 'http://localhost:3000');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Apollo-Require-Preflight');
-
+  let fileStream;
   try {
     const { downloadId } = req.params;
     
@@ -262,36 +336,59 @@ app.get('/api/download/:downloadId', async (req, res) => {
     
     // Check download count
     if (file.downloadCount >= file.maxDownloads) {
-      return res.status(403).json({ error: 'Maximum download limit reached' });
+      return res.status(403).json({ error: 'Maximum downloads reached' });
     }
     
-    // Read the encrypted file
+    // Get file path
     const filePath = path.join(UPLOAD_DIR, downloadId);
     if (!fs.existsSync(filePath)) {
       return res.status(404).json({ error: 'File not found on disk' });
     }
     
-    // Read file data and convert to base64
-    const fileData = fs.readFileSync(filePath);
-    const base64Data = fileData.toString('base64');
+    // Get file stats
+    const stats = fs.statSync(filePath);
     
-    // Increment download count
-    await db.collection('files').updateOne(
-      { downloadId },
-      { $inc: { downloadCount: 1 } }
-    );
+    // Set headers for file download
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${file.filename}"`);
+    res.setHeader('Content-Length', stats.size);
     
-    // Send response with file data
-    res.json({
-      filename: file.filename,
-      mimeType: file.mimeType,
-      data: base64Data,
-      iv: file.iv,
-      salt: file.salt
+    // Create read stream
+    fileStream = fs.createReadStream(filePath);
+    
+    // Handle stream errors
+    fileStream.on('error', (error) => {
+      console.error('File stream error:', error);
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'Failed to stream file' });
+      }
     });
+    
+    // Handle stream completion
+    fileStream.on('end', async () => {
+      try {
+        // Only increment download count if the stream completed successfully
+        await db.collection('files').updateOne(
+          { downloadId },
+          { $inc: { downloadCount: 1 } }
+        );
+      } catch (error) {
+        console.error('Failed to update download count:', error);
+      }
+    });
+    
+    // Pipe the encrypted file to the response
+    fileStream.pipe(res);
+    
   } catch (error) {
     console.error('Download error:', error);
-    res.status(500).json({ error: error.message || 'Failed to download file' });
+    if (!res.headersSent) {
+      res.status(500).json({ error: error.message || 'Failed to download file' });
+    }
+    // Clean up the stream if it was created
+    if (fileStream) {
+      fileStream.destroy();
+    }
   }
 });
 
@@ -314,6 +411,45 @@ app.post('/api/reset-downloads/:downloadId', cors(corsOptions), async (req, res)
   } catch (error) {
     console.error('Reset download count error:', error);
     res.status(500).json({ error: 'Failed to reset download count' });
+  }
+});
+
+// Add file metadata endpoint
+app.get('/api/metadata/:downloadId', async (req, res) => {
+  try {
+    const { downloadId } = req.params;
+    
+    // Get file metadata from database
+    const file = await db.collection('files').findOne({ downloadId });
+    if (!file) {
+      return res.status(404).json({ error: 'File not found' });
+    }
+    
+    // Check if file has expired
+    if (new Date(file.expiresAt) < new Date()) {
+      return res.status(410).json({ error: 'File has expired' });
+    }
+    
+    // Check download count
+    if (file.downloadCount >= file.maxDownloads) {
+      return res.status(403).json({ error: 'Maximum downloads reached' });
+    }
+    
+    // Return file metadata
+    res.json({
+      filename: file.filename,
+      mimeType: file.mimeType,
+      size: file.size,
+      expiresAt: file.expiresAt,
+      maxDownloads: file.maxDownloads,
+      downloadCount: file.downloadCount,
+      iv: file.iv,
+      salt: file.salt
+    });
+    
+  } catch (error) {
+    console.error('Metadata error:', error);
+    res.status(500).json({ error: error.message || 'Failed to fetch file metadata' });
   }
 });
 

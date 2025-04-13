@@ -10,12 +10,29 @@ const client = new ApolloClient({
 
 // Queries and Mutations for file upload
 export const UPLOAD_FILE_MUTATION = gql`
-  mutation UploadFile($file: Upload!, $metadata: String!) {
-    uploadFile(file: $file, metadata: $metadata) {
-      id
+  mutation UploadFile(
+    $file: Upload!
+    $originalFilename: String!
+    $mimeType: String!
+    $size: Int!
+    $iv: String!
+    $salt: String!
+    $maxDownloads: Int
+    $expiresIn: Int
+  ) {
+    uploadFile(
+      file: $file
+      originalFilename: $originalFilename
+      mimeType: $mimeType
+      size: $size
+      iv: $iv
+      salt: $salt
+      maxDownloads: $maxDownloads
+      expiresIn: $expiresIn
+    ) {
+      success
+      message
       downloadId
-      createdAt
-      expiresAt
     }
   }
 `;
@@ -23,31 +40,39 @@ export const UPLOAD_FILE_MUTATION = gql`
 // Get file metadata
 export const GET_FILE_METADATA = gql`
   query GetFileMetadata($downloadId: String!) {
-    fileMetadata(downloadId: $downloadId) {
-      id
-      metadata
+    getFileMetadata(downloadId: $downloadId) {
+      downloadId
       filename
+      mimeType
+      size
+      iv
+      salt
       expiresAt
+      maxDownloads
+      downloadCount
     }
   }
 `;
 
 // Upload encrypted file
 export const uploadEncryptedFile = async (encryptedFile, metadata) => {
-  // Create FormData for file transfer
-  const file = new File([encryptedFile], 'encrypted_file.bin', {
-    type: 'application/octet-stream',
-  });
-  
   try {
     const { data } = await client.mutate({
       mutation: UPLOAD_FILE_MUTATION,
       variables: {
-        file: file,
-        metadata: JSON.stringify(metadata)
+        file: encryptedFile,
+        originalFilename: metadata.filename,
+        mimeType: metadata.mimeType,
+        size: metadata.size,
+        iv: metadata.iv,
+        salt: metadata.salt,
+        maxDownloads: metadata.maxDownloads,
+        expiresIn: metadata.expiresIn
       },
       context: {
-        useMultipart: true // Use multipart/form-data format for file upload
+        headers: {
+          'Apollo-Require-Preflight': 'true'
+        }
       }
     });
     
@@ -66,7 +91,7 @@ export const getFileMetadata = async (downloadId) => {
       variables: { downloadId }
     });
     
-    return data.fileMetadata;
+    return data.getFileMetadata;
   } catch (error) {
     console.error('Failed to get file metadata:', error);
     throw new Error('File not found or link has expired');
@@ -86,7 +111,7 @@ export const downloadEncryptedFile = async (downloadId) => {
     }
     
     const encryptedFile = await response.blob();
-    return { encryptedFile, metadata: JSON.parse(metadata.metadata) };
+    return { encryptedFile, metadata };
   } catch (error) {
     console.error('Download failed:', error);
     throw new Error('Download failed, please check if the link is valid');
