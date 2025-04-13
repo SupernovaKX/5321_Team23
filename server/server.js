@@ -3,15 +3,22 @@ const { ApolloServer } = require('@apollo/server');
 const { expressMiddleware } = require('@apollo/server/express4');
 const { graphqlUploadExpress } = require('graphql-upload-minimal');
 const { MongoClient } = require('mongodb');
-const { makeExecutableSchema } = require('@graphql-tools/schema');  // Add this line
+const { makeExecutableSchema } = require('@graphql-tools/schema');
 const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 // Environment configuration
 const PORT = process.env.PORT || 4000;
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017';
-const DB_NAME = 'file_encryption';
+const DB_NAME = 'encrypted_file_storage';
+const UPLOAD_DIR = path.join(__dirname, '../uploads');
+
+// Ensure upload directory exists
+if (!fs.existsSync(UPLOAD_DIR)) {
+  fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+}
 
 let db;
 
@@ -22,9 +29,11 @@ async function connectToDatabase() {
     await client.connect();
     console.log('Connected to MongoDB');
     db = client.db(DB_NAME);
+    
     // Create indexes
     await db.collection('files').createIndex({ downloadId: 1 }, { unique: true });
     await db.collection('files').createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+    await db.collection('files').createIndex({ createdAt: 1 });
   } catch (error) {
     console.error('MongoDB connection error:', error);
     process.exit(1);
@@ -40,13 +49,117 @@ const typeDefs = fs.readFileSync(
 const resolvers = {
   Query: {
     fileMetadata: async (_, { downloadId }) => {
-      return await db.collection('files').findOne({ downloadId });
+      const file = await db.collection('files').findOne({ downloadId });
+      if (!file) return null;
+      
+      // Check if file is expired
+      const isExpired = new Date(file.expiresAt) < new Date();
+      return { ...file, isExpired };
     },
     files: async () => {
-      return await db.collection('files').find().toArray();
+      const files = await db.collection('files').find().toArray();
+      return files.map(file => ({
+        ...file,
+        isExpired: new Date(file.expiresAt) < new Date()
+      }));
     }
   },
-  // ...other resolvers
+  Mutation: {
+    uploadFile: async (_, { file, originalFilename, mimeType, size, iv, salt, maxDownloads, expiresIn }) => {
+      try {
+        const { createReadStream, filename } = await file;
+        const downloadId = crypto.randomBytes(16).toString('hex');
+        const filePath = path.join(UPLOAD_DIR, downloadId);
+        
+        // Save the file
+        const stream = createReadStream();
+        const writeStream = fs.createWriteStream(filePath);
+        await new Promise((resolve, reject) => {
+          stream.pipe(writeStream)
+            .on('finish', resolve)
+            .on('error', reject);
+        });
+
+        // Get the encrypted file size
+        const encryptedSize = fs.statSync(filePath).size;
+
+        // Calculate expiry date
+        const expiresAt = new Date();
+        expiresAt.setSeconds(expiresAt.getSeconds() + expiresIn);
+
+        // Save file metadata to database
+        const fileDoc = {
+          downloadId,
+          filename,
+          originalFilename,
+          mimeType,
+          size,
+          encryptedSize,
+          iv,
+          salt,
+          createdAt: new Date(),
+          expiresAt,
+          downloadCount: 0,
+          maxDownloads: maxDownloads || null
+        };
+
+        await db.collection('files').insertOne(fileDoc);
+
+        return {
+          success: true,
+          message: 'File uploaded successfully',
+          file: { ...fileDoc, isExpired: false },
+          downloadUrl: `/api/download/${downloadId}`
+        };
+      } catch (error) {
+        console.error('Upload error:', error);
+        return {
+          success: false,
+          message: 'Failed to upload file',
+          file: null,
+          downloadUrl: null
+        };
+      }
+    },
+    deleteFile: async (_, { downloadId }) => {
+      try {
+        const file = await db.collection('files').findOne({ downloadId });
+        if (!file) return false;
+
+        // Delete file from storage
+        const filePath = path.join(UPLOAD_DIR, downloadId);
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+        }
+
+        // Delete from database
+        await db.collection('files').deleteOne({ downloadId });
+        return true;
+      } catch (error) {
+        console.error('Delete error:', error);
+        return false;
+      }
+    },
+    extendFileExpiry: async (_, { downloadId, duration }) => {
+      try {
+        const file = await db.collection('files').findOne({ downloadId });
+        if (!file) return null;
+
+        const newExpiry = new Date(file.expiresAt);
+        newExpiry.setSeconds(newExpiry.getSeconds() + duration);
+
+        await db.collection('files').updateOne(
+          { downloadId },
+          { $set: { expiresAt: newExpiry } }
+        );
+
+        return { ...file, expiresAt: newExpiry, isExpired: false };
+      } catch (error) {
+        console.error('Extend expiry error:', error);
+        return null;
+      }
+    }
+  }
 };
 
 // Create Express application
@@ -67,18 +180,9 @@ async function startServer() {
 
   // Middleware configuration
   app.use(cors({
-    origin: 'http://localhost:3000',  // Frontend application address
+    origin: 'http://localhost:3000',
     credentials: true
   }));
-
-  // Add CSP headers
-  app.use((req, res, next) => {
-    res.setHeader(
-      'Content-Security-Policy',
-      "default-src 'self'; connect-src 'self' http://localhost:4000; script-src 'self' 'unsafe-inline' 'unsafe-eval';"
-    );
-    next();
-  });
 
   app.use(express.json());
   
@@ -92,7 +196,7 @@ async function startServer() {
   app.use('/graphql', expressMiddleware(server));
 
   // Static file service (for file downloads)
-  app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+  app.use('/uploads', express.static(UPLOAD_DIR));
 
   // File download route
   app.get('/api/download/:downloadId', async (req, res) => {
@@ -104,8 +208,31 @@ async function startServer() {
         return res.status(404).send('File not found');
       }
 
-      const filePath = path.join(__dirname, '../uploads', file.downloadId);
-      res.download(filePath, file.filename);
+      // Check if file is expired
+      if (new Date(file.expiresAt) < new Date()) {
+        return res.status(410).send('File has expired');
+      }
+
+      // Check download limit
+      if (file.maxDownloads && file.downloadCount >= file.maxDownloads) {
+        return res.status(403).send('Maximum download limit reached');
+      }
+
+      const filePath = path.join(UPLOAD_DIR, file.downloadId);
+      
+      // Increment download count
+      await db.collection('files').updateOne(
+        { downloadId },
+        { $inc: { downloadCount: 1 } }
+      );
+
+      // Set appropriate headers
+      res.setHeader('Content-Type', file.mimeType);
+      res.setHeader('Content-Disposition', `attachment; filename="${file.originalFilename}"`);
+      
+      // Stream the file
+      const stream = fs.createReadStream(filePath);
+      stream.pipe(res);
     } catch (error) {
       console.error('Download error:', error);
       res.status(500).send('Internal server error');
@@ -116,7 +243,7 @@ async function startServer() {
   app.listen(PORT, () => {
     console.log(`
       🚀 Server ready at http://localhost:${PORT}/graphql
-      📁 File uploads enabled
+      📁 Encrypted file storage enabled
       🔒 End-to-end encryption ready
     `);
   });
