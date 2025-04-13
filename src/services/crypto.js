@@ -54,96 +54,120 @@ export const deriveKey = async (password) => {
 };
 
 // 加密文件
-export const encryptFile = async (file, password) => {
-  // 生成加密密钥和初始化向量
-  const { key, salt } = await deriveKey(password);
-  const iv = window.crypto.getRandomValues(new Uint8Array(12));
-  
-  // 读取文件内容
-  const fileBuffer = await file.arrayBuffer();
-  
-  // 使用AES-GCM加密文件
-  const encryptedBuffer = await window.crypto.subtle.encrypt(
-    {
-      name: 'AES-GCM',
-      iv
-    },
-    key,
-    fileBuffer
-  );
-  
-  // 创建包含所有必要数据的结果对象
-  const encryptedFile = new Blob([encryptedBuffer], { type: 'application/octet-stream' });
-  
-  // 导出密钥以便后续解密
-  const exportedKeyBuffer = await window.crypto.subtle.exportKey('raw', key);
-  
-  // 返回加密文件和解密所需的元数据
-  return {
-    encryptedFile,
-    metadata: {
-      salt: Array.from(salt),
-      iv: Array.from(iv),
-      originalName: file.name,
-      originalType: file.type,
-      originalSize: file.size
-    }
-  };
+export const encryptFile = async (fileData, password) => {
+  try {
+    console.log('Starting encryption');
+    
+    // Generate encryption key and salt
+    const encoder = new TextEncoder();
+    const passwordBuffer = encoder.encode(password);
+    
+    // Import password as raw key material
+    const importedKey = await window.crypto.subtle.importKey(
+      'raw',
+      passwordBuffer,
+      { name: 'PBKDF2' },
+      false,
+      ['deriveKey']
+    );
+    
+    // Generate salt
+    const salt = window.crypto.getRandomValues(new Uint8Array(16));
+    
+    // Derive key using PBKDF2
+    const key = await window.crypto.subtle.deriveKey(
+      {
+        name: 'PBKDF2',
+        salt,
+        iterations: 100000,
+        hash: 'SHA-256'
+      },
+      importedKey,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['encrypt']
+    );
+    
+    // Generate IV
+    const iv = window.crypto.getRandomValues(new Uint8Array(12));
+    
+    // Encrypt the data
+    const encryptedData = await window.crypto.subtle.encrypt(
+      {
+        name: 'AES-GCM',
+        iv
+      },
+      key,
+      fileData
+    );
+    
+    console.log('Encryption successful');
+    
+    // Convert to base64 for storage
+    const encryptedArray = new Uint8Array(encryptedData);
+    const encryptedBase64 = btoa(String.fromCharCode(...encryptedArray));
+    
+    return {
+      encryptedData: encryptedBase64,
+      iv: btoa(String.fromCharCode(...iv)),
+      salt: btoa(String.fromCharCode(...salt))
+    };
+  } catch (error) {
+    console.error('Encryption error:', error);
+    throw new Error('Failed to encrypt file');
+  }
 };
 
 // 解密文件
-export const decryptFile = async (encryptedFile, metadata, password) => {
-  const { salt, iv, originalName, originalType } = metadata;
-  
-  // 重新创建密钥
-  const encoder = new TextEncoder();
-  const passwordBuffer = encoder.encode(password);
-  
-  // 导入密码作为原始密钥材料
-  const importedKey = await window.crypto.subtle.importKey(
-    'raw',
-    passwordBuffer,
-    { name: 'PBKDF2' },
-    false,
-    ['deriveKey']
-  );
-  
-  // 使用相同的盐值和迭代次数派生相同的密钥
-  const derivedKey = await window.crypto.subtle.deriveKey(
-    {
-      name: 'PBKDF2',
-      salt: new Uint8Array(salt),
-      iterations: 100000,
-      hash: 'SHA-256'
-    },
-    importedKey,
-    { name: 'AES-GCM', length: 256 },
-    false,
-    ['decrypt']
-  );
-  
-  // 读取加密文件内容
-  const encryptedBuffer = await encryptedFile.arrayBuffer();
-  
-  // 使用AES-GCM解密文件
+export const decryptFile = async (encryptedData, password, ivBase64, saltBase64) => {
   try {
-    const decryptedBuffer = await window.crypto.subtle.decrypt(
-      {
-        name: 'AES-GCM',
-        iv: new Uint8Array(iv)
-      },
-      derivedKey,
-      encryptedBuffer
+    console.log('Starting decryption with provided parameters');
+    
+    // Convert base64 strings to ArrayBuffers
+    const iv = Uint8Array.from(atob(ivBase64), c => c.charCodeAt(0));
+    const salt = Uint8Array.from(atob(saltBase64), c => c.charCodeAt(0));
+    
+    // Convert password to ArrayBuffer
+    const encoder = new TextEncoder();
+    const passwordBuffer = encoder.encode(password);
+    
+    // Import password as raw key material
+    const importedKey = await window.crypto.subtle.importKey(
+      'raw',
+      passwordBuffer,
+      { name: 'PBKDF2' },
+      false,
+      ['deriveKey']
     );
     
-    // 创建解密后的文件Blob，恢复原始文件类型
-    const decryptedFile = new Blob([decryptedBuffer], { type: originalType || 'application/octet-stream' });
+    // Derive key using PBKDF2
+    const key = await window.crypto.subtle.deriveKey(
+      {
+        name: 'PBKDF2',
+        salt,
+        iterations: 100000,
+        hash: 'SHA-256'
+      },
+      importedKey,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['decrypt']
+    );
     
-    return {
-      file: decryptedFile,
-      fileName: originalName
-    };
+    // Decrypt the data
+    const decryptedData = await window.crypto.subtle.decrypt(
+      {
+        name: 'AES-GCM',
+        iv
+      },
+      key,
+      encryptedData
+    );
+    
+    console.log('Decryption successful');
+    return decryptedData;
   } catch (error) {
-    throw new Error('解密失败！请检查密码是否正确。');
+    console.error('Decryption error:', error);
+    throw new Error('Failed to decrypt file. Please check your password and try again.');
   }
 };

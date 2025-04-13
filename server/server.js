@@ -48,7 +48,13 @@ const typeDefs = `
   type File {
     downloadId: String!
     filename: String!
+    mimeType: String!
+    size: Int!
+    iv: String!
+    salt: String!
     expiresAt: String!
+    maxDownloads: Int
+    downloadCount: Int
   }
 
   type UploadFileResponse {
@@ -59,6 +65,7 @@ const typeDefs = `
 
   type Query {
     getFile(downloadId: String!): File
+    getFileMetadata(downloadId: String!): File
   }
 
   type Mutation {
@@ -72,6 +79,8 @@ const typeDefs = `
       maxDownloads: Int
       expiresIn: Int
     ): UploadFileResponse!
+    
+    downloadFile(downloadId: String!): File!
   }
 `;
 
@@ -84,18 +93,35 @@ const resolvers = {
         throw new Error('File not found');
       }
       return file;
+    },
+    getFileMetadata: async (_, { downloadId }) => {
+      const file = await db.collection('files').findOne({ downloadId });
+      if (!file) {
+        throw new Error('File not found');
+      }
+      return file;
     }
   },
   Mutation: {
     uploadFile: async (_, { file, originalFilename, mimeType, size, iv, salt, maxDownloads = 1, expiresIn = 604800 }) => {
       try {
+        console.log('Starting file upload:', {
+          originalFilename,
+          mimeType,
+          size,
+          hasIv: !!iv,
+          hasSalt: !!salt
+        });
+
         const { createReadStream } = await file;
         
         // Generate a unique download ID
         const downloadId = crypto.randomBytes(16).toString('hex');
+        console.log('Generated downloadId:', downloadId);
         
         // Create the file path
         const filePath = path.join(UPLOAD_DIR, downloadId);
+        console.log('Saving file to:', filePath);
         
         // Create a write stream
         const writeStream = fs.createWriteStream(filePath);
@@ -104,8 +130,25 @@ const resolvers = {
         await new Promise((resolve, reject) => {
           createReadStream()
             .pipe(writeStream)
-            .on('finish', resolve)
-            .on('error', reject);
+            .on('finish', () => {
+              console.log('File written successfully');
+              resolve();
+            })
+            .on('error', (error) => {
+              console.error('Error writing file:', error);
+              reject(error);
+            });
+        });
+        
+        // Verify file was written
+        if (!fs.existsSync(filePath)) {
+          throw new Error('File was not written to disk');
+        }
+        
+        const stats = fs.statSync(filePath);
+        console.log('File stats:', {
+          size: stats.size,
+          exists: true
         });
         
         // Calculate expiration date
@@ -125,6 +168,13 @@ const resolvers = {
           createdAt: new Date()
         };
         
+        console.log('Saving file metadata to database:', {
+          downloadId,
+          filename: originalFilename,
+          hasIv: !!iv,
+          hasSalt: !!salt
+        });
+        
         await db.collection('files').insertOne(newFile);
         
         return {
@@ -139,6 +189,77 @@ const resolvers = {
           message: error.message,
           downloadId: null
         };
+      }
+    },
+    downloadFile: async (_, { downloadId }) => {
+      try {
+        console.log('Download request for file:', downloadId);
+        const file = await db.collection('files').findOne({ downloadId });
+        
+        if (!file) {
+          console.log('File not found in database');
+          throw new Error('File not found');
+        }
+
+        console.log('Found file in database:', {
+          filename: file.filename,
+          mimeType: file.mimeType,
+          size: file.size,
+          hasIv: !!file.iv,
+          hasSalt: !!file.salt,
+          downloadCount: file.downloadCount,
+          maxDownloads: file.maxDownloads
+        });
+
+        // Check if file is expired
+        if (new Date(file.expiresAt) < new Date()) {
+          console.log('File has expired:', file.expiresAt);
+          throw new Error('File has expired');
+        }
+
+        // Check download limit
+        if (file.maxDownloads && file.downloadCount >= file.maxDownloads) {
+          console.log('Download limit reached:', file.downloadCount, '/', file.maxDownloads);
+          throw new Error('Maximum download limit reached');
+        }
+
+        // Increment download count
+        await db.collection('files').updateOne(
+          { downloadId },
+          { $inc: { downloadCount: 1 } }
+        );
+
+        // Read the file
+        const filePath = path.join(UPLOAD_DIR, file.downloadId);
+        console.log('Reading file from path:', filePath);
+        
+        if (!fs.existsSync(filePath)) {
+          console.log('File not found on disk:', filePath);
+          throw new Error('File not found on disk');
+        }
+
+        const fileData = fs.readFileSync(filePath);
+        console.log('File read successfully, size:', fileData.length);
+
+        if (fileData.length === 0) {
+          console.log('File is empty');
+          throw new Error('File is empty');
+        }
+
+        // Return file data and metadata
+        const response = {
+          filename: file.filename,
+          mimeType: file.mimeType,
+          data: fileData.toString('base64'),
+          iv: file.iv,
+          salt: file.salt
+        };
+
+        console.log('Returning response with data length:', response.data.length);
+        return response;
+      } catch (error) {
+        console.error('Download error:', error);
+        throw error;
       }
     }
   }
@@ -202,56 +323,6 @@ async function startServer() {
 
   // Static file service (for file downloads)
   app.use('/uploads', express.static(UPLOAD_DIR));
-
-  // File download route
-  app.get('/api/download/:downloadId', async (req, res) => {
-    try {
-      const { downloadId } = req.params;
-      
-      // Handle error case
-      if (downloadId === 'error') {
-        return res.status(400).json({
-          error: 'File upload failed',
-          message: 'The file could not be uploaded. Please try again.'
-        });
-      }
-
-      const file = await db.collection('files').findOne({ downloadId });
-      
-      if (!file) {
-        return res.status(404).send('File not found');
-      }
-
-      // Check if file is expired
-      if (new Date(file.expiresAt) < new Date()) {
-        return res.status(410).send('File has expired');
-      }
-
-      // Check download limit
-      if (file.maxDownloads && file.downloadCount >= file.maxDownloads) {
-        return res.status(403).send('Maximum download limit reached');
-      }
-
-      const filePath = path.join(UPLOAD_DIR, file.downloadId);
-      
-      // Increment download count
-      await db.collection('files').updateOne(
-        { downloadId },
-        { $inc: { downloadCount: 1 } }
-      );
-
-      // Set appropriate headers
-      res.setHeader('Content-Type', file.mimeType);
-      res.setHeader('Content-Disposition', `attachment; filename="${file.originalFilename}"`);
-      
-      // Stream the file
-      const stream = fs.createReadStream(filePath);
-      stream.pipe(res);
-    } catch (error) {
-      console.error('Download error:', error);
-      res.status(500).send('Internal server error');
-    }
-  });
 
   // Start server
   app.listen(PORT, () => {
