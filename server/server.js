@@ -54,7 +54,7 @@ const typeDefs = `
   type UploadFileResponse {
     success: Boolean!
     message: String!
-    downloadUrl: String
+    downloadId: String
   }
 
   type Query {
@@ -89,7 +89,7 @@ const resolvers = {
   Mutation: {
     uploadFile: async (_, { file, originalFilename, mimeType, size, iv, salt, maxDownloads = 1, expiresIn = 604800 }) => {
       try {
-        const { createReadStream, filename, mimetype, encoding } = await file;
+        const { createReadStream } = await file;
         
         // Generate a unique download ID
         const downloadId = crypto.randomBytes(16).toString('hex');
@@ -121,25 +121,23 @@ const resolvers = {
           salt,
           maxDownloads,
           expiresAt,
-          downloadCount: 0
+          downloadCount: 0,
+          createdAt: new Date()
         };
         
         await db.collection('files').insertOne(newFile);
         
-        // Generate download URL
-        const downloadUrl = `http://localhost:4000/api/download/${downloadId}`;
-        
         return {
           success: true,
           message: 'File uploaded successfully',
-          downloadUrl
+          downloadId
         };
       } catch (error) {
         console.error('Upload error:', error);
         return {
           success: false,
           message: error.message,
-          downloadUrl: null
+          downloadId: null
         };
       }
     }

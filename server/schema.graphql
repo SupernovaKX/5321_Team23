@@ -28,7 +28,7 @@ type UploadResponse {
   success: Boolean!
   message: String
   file: File
-  downloadUrl: String!
+  downloadId: String!
 }
 
 """
