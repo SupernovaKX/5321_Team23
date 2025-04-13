@@ -10,14 +10,14 @@ const UploadPage = () => {
   const handleUploadComplete = (result) => {
     setUploadResult(result);
     
-    // 将信息保存到历史记录
+    // Save information to history
     const history = JSON.parse(localStorage.getItem('uploadHistory') || '[]');
     history.unshift({
       ...result,
       uploadedAt: new Date().toISOString(),
     });
     
-    // 只保留最近10条记录
+    // Keep only the last 10 records
     if (history.length > 10) {
       history.length = 10;
     }
@@ -37,7 +37,7 @@ const UploadPage = () => {
         <div>
           <ShareLinks {...uploadResult} />
           <button className="reset-button" onClick={handleReset}>
-            上传新文件
+            Upload New File
           </button>
         </div>
       )}

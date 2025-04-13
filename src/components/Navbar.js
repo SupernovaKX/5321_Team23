@@ -8,7 +8,7 @@ const Navbar = () => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const location = useLocation();
   
-  // 监听滚动事件以更改导航栏样式
+  // Listen for scroll events to update navbar style
   useEffect(() => {
     const handleScroll = () => {
       if (window.scrollY > 20) {
@@ -20,18 +20,18 @@ const Navbar = () => {
     
     window.addEventListener('scroll', handleScroll);
     
-    // 组件卸载时移除事件监听器
+    // Remove event listener when component unmounts
     return () => {
       window.removeEventListener('scroll', handleScroll);
     };
   }, []);
   
-  // 关闭移动菜单当路由变化时
+  // Close mobile menu when route changes
   useEffect(() => {
     setIsMobileMenuOpen(false);
   }, [location]);
   
-  // 切换移动菜单的开关状态
+  // Toggle mobile menu state
   const toggleMobileMenu = () => {
     setIsMobileMenuOpen(!isMobileMenuOpen);
   };
@@ -46,7 +46,7 @@ const Navbar = () => {
               <path d="M17 8.5H15.5V6.5C15.5 5.7 15.13 4.9 14.5 4.29C13.87 3.68 13 3.3 12 3.3C11 3.3 10.13 3.68 9.5 4.29C8.87 4.9 8.5 5.7 8.5 6.5V8.5H7C6.45 8.5 6 8.95 6 9.5V16.5C6 17.05 6.45 17.5 7 17.5H17C17.55 17.5 18 17.05 18 16.5V9.5C18 8.95 17.55 8.5 17 8.5ZM12.5 13.5C12.5 13.78 12.28 14 12 14C11.72 14 11.5 13.78 11.5 13.5V12.5C11.5 12.22 11.72 12 12 12C12.28 12 12.5 12.22 12.5 12.5V13.5ZM13.5 8.5H10.5V6.5C10.5 5.95 10.95 5.5 11.5 5.5H12.5C13.05 5.5 13.5 5.95 13.5 6.5V8.5Z" fill="currentColor" />
             </svg>
           </div>
-          <span className="logo-text">安全文件分享</span>
+          <span className="logo-text">Secure File Sharing</span>
         </Link>
         
         <div className="menu-icon" onClick={toggleMobileMenu}>
@@ -60,12 +60,12 @@ const Navbar = () => {
         <ul className={`nav-menu ${isMobileMenuOpen ? 'active' : ''}`}>
           <li className="nav-item">
             <Link to="/" className={location.pathname === '/' ? 'nav-link active' : 'nav-link'}>
-              首页
+              Home
             </Link>
           </li>
           <li className="nav-item">
             <Link to="/upload" className={location.pathname === '/upload' ? 'nav-link active' : 'nav-link'}>
-              上传文件
+              Upload File
             </Link>
           </li>
           <li className="nav-item">
@@ -80,7 +80,7 @@ const Navbar = () => {
         
         <div className="nav-actions">
           <Link to="/upload" className="upload-button">
-            加密并分享
+            Encrypt & Share
           </Link>
         </div>
       </div>

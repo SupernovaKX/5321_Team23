@@ -13,14 +13,14 @@ const NotFoundPage = () => {
           </svg>
         </div>
         <h1>404</h1>
-        <h2>页面未找到</h2>
-        <p>您请求的页面不存在或已被移除。</p>
+        <h2>Page Not Found</h2>
+        <p>The page you requested does not exist or has been removed.</p>
         <div className="not-found-actions">
           <Link to="/" className="primary-button">
-            返回首页
+            Back to Home
           </Link>
           <Link to="/upload" className="secondary-button">
-            上传文件
+            Upload File
           </Link>
         </div>
       </div>

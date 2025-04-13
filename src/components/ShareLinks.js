@@ -18,51 +18,51 @@ const ShareLinks = ({ downloadUrl, password, expiresAt, originalFileName }) => {
     setTimeout(() => setPasswordCopied(false), 2000);
   };
   
-  // 格式化过期时间
+  // Format expiry time
   const formatExpiresAt = (dateString) => {
-    if (!dateString) return '永不过期';
+    if (!dateString) return 'Never Expires';
     const expiryDate = new Date(dateString);
     return expiryDate.toLocaleString();
   };
 
   return (
     <div className="share-links-container">
-      <h2>文件已成功加密并上传!</h2>
-      <p>请分别发送下载链接和密码给接收者，建议使用不同的渠道发送</p>
+      <h2>File Successfully Encrypted and Uploaded!</h2>
+      <p>Please send the download link and password separately to the recipient, preferably through different channels</p>
       
       <div className="file-info">
-        <p><strong>文件名:</strong> {originalFileName}</p>
-        <p><strong>过期时间:</strong> {formatExpiresAt(expiresAt)}</p>
+        <p><strong>Filename:</strong> {originalFileName}</p>
+        <p><strong>Expires:</strong> {formatExpiresAt(expiresAt)}</p>
       </div>
       
       <div className="link-container">
-        <h3>下载链接</h3>
+        <h3>Download Link</h3>
         <div className="copy-field">
           <input type="text" value={downloadUrl} readOnly />
           <button onClick={handleCopyLink}>
-            {linkCopied ? '已复制!' : '复制链接'}
+            {linkCopied ? 'Copied!' : 'Copy Link'}
           </button>
         </div>
-        <p className="share-tip">通过电子邮件或消息发送此链接</p>
+        <p className="share-tip">Share this link via email or message</p>
       </div>
       
       <div className="password-container">
-        <h3>解密密码</h3>
+        <h3>Decryption Password</h3>
         <div className="copy-field">
           <input type="text" value={password} readOnly />
           <button onClick={handleCopyPassword}>
-            {passwordCopied ? '已复制!' : '复制密码'}
+            {passwordCopied ? 'Copied!' : 'Copy Password'}
           </button>
         </div>
-        <p className="share-tip"><strong>安全提示:</strong> 使用不同的通信渠道发送密码 (如电话、短信)</p>
+        <p className="share-tip"><strong>Security Tip:</strong> Send the password through a different channel (e.g., phone, SMS)</p>
       </div>
       
       <div className="security-note">
-        <h3>安全提示</h3>
+        <h3>Security Notes</h3>
         <ul>
-          <li>下载链接和密码仅显示一次，请立即复制</li>
-          <li>为提高安全性，请使用不同渠道分享链接和密码</li>
-          <li>我们的服务器无法访问您的文件内容或密码</li>
+          <li>Download link and password are shown only once, copy them immediately</li>
+          <li>For enhanced security, share the link and password through different channels</li>
+          <li>Our servers cannot access your file contents or password</li>
         </ul>
       </div>
     </div>

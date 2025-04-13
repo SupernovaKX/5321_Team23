@@ -2,13 +2,13 @@
 
 import { ApolloClient, InMemoryCache, gql } from '@apollo/client';
 
-// 创建Apollo Client实例
+// Create Apollo Client instance
 const client = new ApolloClient({
   uri: process.env.REACT_APP_GRAPHQL_ENDPOINT || 'http://localhost:4000/graphql',
   cache: new InMemoryCache()
 });
 
-// 上传文件的相关Query和Mutation
+// Queries and Mutations for file upload
 export const UPLOAD_FILE_MUTATION = gql`
   mutation UploadFile($file: Upload!, $metadata: String!) {
     uploadFile(file: $file, metadata: $metadata) {
@@ -20,7 +20,7 @@ export const UPLOAD_FILE_MUTATION = gql`
   }
 `;
 
-// 获取文件元数据
+// Get file metadata
 export const GET_FILE_METADATA = gql`
   query GetFileMetadata($downloadId: String!) {
     fileMetadata(downloadId: $downloadId) {
@@ -32,9 +32,9 @@ export const GET_FILE_METADATA = gql`
   }
 `;
 
-// 上传加密文件
+// Upload encrypted file
 export const uploadEncryptedFile = async (encryptedFile, metadata) => {
-  // 创建FormData以传输文件
+  // Create FormData for file transfer
   const file = new File([encryptedFile], 'encrypted_file.bin', {
     type: 'application/octet-stream',
   });
@@ -47,18 +47,18 @@ export const uploadEncryptedFile = async (encryptedFile, metadata) => {
         metadata: JSON.stringify(metadata)
       },
       context: {
-        useMultipart: true // 使用multipart/form-data格式发送文件
+        useMultipart: true // Use multipart/form-data format for file upload
       }
     });
     
     return data.uploadFile;
   } catch (error) {
-    console.error('上传文件失败:', error);
-    throw new Error('上传文件失败，请重试');
+    console.error('File upload failed:', error);
+    throw new Error('File upload failed, please try again');
   }
 };
 
-// 获取文件元数据以准备下载
+// Get file metadata before download
 export const getFileMetadata = async (downloadId) => {
   try {
     const { data } = await client.query({
@@ -68,27 +68,27 @@ export const getFileMetadata = async (downloadId) => {
     
     return data.fileMetadata;
   } catch (error) {
-    console.error('获取文件元数据失败:', error);
-    throw new Error('找不到文件或链接已过期');
+    console.error('Failed to get file metadata:', error);
+    throw new Error('File not found or link has expired');
   }
 };
 
-// 下载加密文件
+// Download encrypted file
 export const downloadEncryptedFile = async (downloadId) => {
   try {
-    // 获取文件元数据
+    // Get file metadata
     const metadata = await getFileMetadata(downloadId);
     
-    // 使用普通的fetch API下载文件
+    // Use standard fetch API to download file
     const response = await fetch(`/api/download/${downloadId}`);
     if (!response.ok) {
-      throw new Error('文件下载失败');
+      throw new Error('File download failed');
     }
     
     const encryptedFile = await response.blob();
     return { encryptedFile, metadata: JSON.parse(metadata.metadata) };
   } catch (error) {
-    console.error('下载文件失败:', error);
-    throw new Error('下载文件失败，请检查链接是否有效');
+    console.error('Download failed:', error);
+    throw new Error('Download failed, please check if the link is valid');
   }
 };
