@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import './FileUpload.css';
 import { useMutation } from '@apollo/client';
 import { gql } from '@apollo/client';
+import { generatePassword, encryptFile } from '../services/crypto';
 
 const UPLOAD_FILE = gql`
   mutation UploadFile(
@@ -63,55 +64,6 @@ const FileUpload = () => {
     }
   });
 
-  // Generate random encryption key
-  const generateKey = async () => {
-    return await window.crypto.subtle.generateKey(
-      {
-        name: "AES-GCM",
-        length: 256
-      },
-      true,
-      ["encrypt", "decrypt"]
-    );
-  };
-
-  // Encrypt file
-  const encryptFile = async (fileData) => {
-    try {
-      const key = await generateKey();
-      const iv = window.crypto.getRandomValues(new Uint8Array(12));
-      const salt = window.crypto.getRandomValues(new Uint8Array(16));
-      
-      const encryptedContent = await window.crypto.subtle.encrypt(
-        {
-          name: "AES-GCM",
-          iv: iv
-        },
-        key,
-        fileData
-      );
-
-      // Export key for future decryption
-      const exportedKey = await window.crypto.subtle.exportKey("raw", key);
-      const keyBase64 = btoa(String.fromCharCode(...new Uint8Array(exportedKey)));
-      setEncryptionKey(keyBase64);
-
-      // Combine IV and encrypted data
-      const encryptedArray = new Uint8Array(iv.length + encryptedContent.byteLength);
-      encryptedArray.set(iv, 0);
-      encryptedArray.set(new Uint8Array(encryptedContent), iv.length);
-      
-      return {
-        encryptedData: encryptedArray,
-        iv: btoa(String.fromCharCode(...iv)),
-        salt: btoa(String.fromCharCode(...salt))
-      };
-    } catch (error) {
-      console.error('Encryption error:', error);
-      throw new Error('File encryption failed');
-    }
-  };
-
   // Handle file selection
   const handleFileChange = (e) => {
     if (e.target.files?.length > 0) {
@@ -145,16 +97,26 @@ const FileUpload = () => {
       // Read the file as ArrayBuffer
       const fileBuffer = await file.arrayBuffer();
       
-      // Encrypt the file
-      const { encryptedData, iv, salt } = await encryptFile(fileBuffer);
+      // Generate a random password
+      const password = generatePassword();
+      setEncryptionKey(password);
       
+      // Encrypt the file
+      const { encryptedData, iv, salt } = await encryptFile(fileBuffer, password);
+      
+      // Create a Blob from the encrypted data
+      const encryptedBlob = new Blob([encryptedData], { type: 'application/octet-stream' });
+      
+      // Create a new File object from the Blob
+      const encryptedFile = new File([encryptedBlob], file.name, { type: 'application/octet-stream' });
+
       // Upload the file
       const { data } = await uploadFileMutation({
         variables: {
-          file: file, // Send the original file
+          file: encryptedFile,
           originalFilename: file.name,
           mimeType: file.type,
-          size: file.size, // Use original file size
+          size: encryptedData.length,
           iv,
           salt,
           maxDownloads,
