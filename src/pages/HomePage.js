@@ -7,88 +7,88 @@ const HomePage = () => {
   return (
     <div className="home-page">
       <div className="hero-section">
-        <h1>安全、私密的端到端加密文件分享</h1>
-        <p className="subtitle">在您的浏览器中加密，服务器永远不会看到您的文件内容或密钥</p>
+        <h1>Secure, Private End-to-End Encrypted File Sharing</h1>
+        <p className="subtitle">Files are encrypted in your browser. The server never sees your file content or encryption keys.</p>
         
         <div className="cta-buttons">
           <Link to="/upload" className="primary-button">
-            加密并分享文件
+            Encrypt & Share Files
           </Link>
         </div>
       </div>
       
       <div className="features-section">
-        <h2>为什么选择我们的服务？</h2>
+        <h2>Why Choose Our Service?</h2>
         
         <div className="features-grid">
           <div className="feature-card">
-            <h3>端到端加密</h3>
-            <p>文件在您的浏览器中使用AES-GCM加密，确保只有您和收件人可以访问内容</p>
+            <h3>End-to-End Encryption</h3>
+            <p>Files are encrypted using AES-GCM in your browser, ensuring only you and the recipient can access the content</p>
           </div>
           
           <div className="feature-card">
-            <h3>零知识架构</h3>
-            <p>我们的服务器永远不会看到您的文件内容或加密密钥，即使被黑客入侵也不会泄露您的数据</p>
+            <h3>Zero-Knowledge Architecture</h3>
+            <p>Our servers never see your file contents or encryption keys, even in case of a security breach</p>
           </div>
           
           <div className="feature-card">
-            <h3>分离的链接和密码</h3>
-            <p>下载链接和解密密码可以通过不同渠道分享，提高安全性</p>
+            <h3>Separate Links and Passwords</h3>
+            <p>Download links and decryption passwords can be shared through different channels for enhanced security</p>
           </div>
           
           <div className="feature-card">
-            <h3>简单易用</h3>
-            <p>无需注册或安装插件，只需上传文件并分享链接和密码</p>
+            <h3>Simple to Use</h3>
+            <p>No registration or plugins required - just upload files and share links and passwords</p>
           </div>
         </div>
       </div>
       
       <div className="how-it-works-section">
-        <h2>工作原理</h2>
+        <h2>How It Works</h2>
         
         <div className="steps">
           <div className="step">
             <div className="step-number">1</div>
-            <h3>上传文件</h3>
-            <p>在浏览器中选择您要分享的文件</p>
+            <h3>Upload File</h3>
+            <p>Select the file you want to share in your browser</p>
           </div>
           
           <div className="step">
             <div className="step-number">2</div>
-            <h3>客户端加密</h3>
-            <p>文件在您的浏览器中使用强大的AES加密</p>
+            <h3>Client-Side Encryption</h3>
+            <p>Files are encrypted in your browser using strong AES encryption</p>
           </div>
           
           <div className="step">
             <div className="step-number">3</div>
-            <h3>获取链接和密码</h3>
-            <p>系统生成下载链接和独立的解密密码</p>
+            <h3>Get Link and Password</h3>
+            <p>System generates download link and separate decryption password</p>
           </div>
           
           <div className="step">
             <div className="step-number">4</div>
-            <h3>安全分享</h3>
-            <p>通过不同渠道分享链接和密码给接收者</p>
+            <h3>Secure Sharing</h3>
+            <p>Share the link and password with recipients through separate channels</p>
           </div>
           
           <div className="step">
             <div className="step-number">5</div>
-            <h3>安全下载</h3>
-            <p>接收者使用链接下载文件，然后用密码在本地解密</p>
+            <h3>Secure Download</h3>
+            <p>Recipients download using the link and decrypt locally using the password</p>
           </div>
         </div>
       </div>
       
       <div className="security-section">
-        <h2>安全是我们的首要任务</h2>
-        <p>我们的文件分享系统采用多层安全措施保护您的隐私：</p>
+        <h2>Security is Our Top Priority</h2>
+        <p>Our file sharing system uses multiple layers of security to protect your privacy:</p>
         
         <ul className="security-features">
-          <li>在浏览器中使用AES-GCM加密算法</li>
-          <li>安全随机密钥生成</li>
-          <li>TLS 1.3加密传输</li>
-          <li>零知识后端 - 服务器从不处理或存储明文或密钥</li>
-          <li>开源代码允许安全审计</li>
+          <li>AES-GCM encryption in the browser</li>
+          <li>Secure random key generation</li>
+          <li>TLS 1.3 encrypted transfer</li>
+          <li>Zero-knowledge backend - servers never process or store plaintext or keys</li>
+          <li>Open source code for security audits</li>
         </ul>
       </div>
     </div>

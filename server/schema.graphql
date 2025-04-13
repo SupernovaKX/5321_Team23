@@ -1,0 +1,67 @@
+scalar Upload
+scalar DateTime
+
+"""
+File type
+"""
+type File {
+  id: ID!
+  downloadId: String!
+  filename: String!
+  metadata: String!
+  mimeType: String!
+  size: Int!
+  createdAt: DateTime!
+  expiresAt: DateTime!
+}
+
+"""
+Upload response type
+"""
+type UploadResponse {
+  success: Boolean!
+  message: String
+  file: File
+}
+
+"""
+Query type
+"""
+type Query {
+  """
+  Get file metadata
+  """
+  fileMetadata(downloadId: String!): File
+  
+  """
+  Get file list (optional, for management)
+  """
+  files: [File!]!
+}
+
+"""
+Mutation type
+"""
+type Mutation {
+  """
+  Upload file
+  """
+  uploadFile(
+    file: Upload!
+    metadata: String!
+    expiresIn: Int = 604800  # Default 7 days
+  ): UploadResponse!
+  
+  """
+  Delete file
+  """
+  deleteFile(downloadId: String!): Boolean!
+  
+  """
+  Extend file expiry
+  """
+  extendFileExpiry(
+    downloadId: String!
+    duration: Int!
+  ): File
+}

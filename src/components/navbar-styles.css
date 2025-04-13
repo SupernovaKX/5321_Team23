@@ -1,4 +1,4 @@
-/* 可以添加到您的全局CSS文件或者创建一个 Navbar.css 并在 Navbar.js 中导入 */
+/* Navigation bar styles - can be added to global CSS or create a separate Navbar.css */
 
 .navbar {
   position: fixed;
@@ -158,7 +158,7 @@
   transform: rotate(-135deg);
 }
 
-/* 响应式设计 */
+/* Responsive Design */
 @media screen and (max-width: 768px) {
   .navbar-container {
     padding: 0 1rem;
