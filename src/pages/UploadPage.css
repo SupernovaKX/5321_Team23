@@ -1,0 +1,243 @@
+.upload-page {
+  min-height: 100vh;
+  background-color: var(--background-primary);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0;
+  margin: 0;
+}
+
+.upload-header {
+  width: 100%;
+  background: linear-gradient(135deg, var(--background-primary), var(--background-secondary));
+  padding: 2rem 0;
+  margin-bottom: 1.5rem;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  position: relative;
+  overflow: hidden;
+}
+
+.upload-header::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: radial-gradient(circle at top right, rgba(99, 102, 241, 0.1), transparent 70%);
+  pointer-events: none;
+}
+
+.upload-header .container {
+  max-width: 800px;
+  margin: 0 auto;
+  text-align: center;
+  padding: 0 2rem;
+  position: relative;
+  z-index: 1;
+}
+
+.page-title {
+  font-size: 2.75rem;
+  font-weight: var(--font-weight-bold);
+  line-height: 1.1;
+  color: var(--text-primary);
+  margin: 0;
+  letter-spacing: -0.02em;
+}
+
+.page-title .gradient-text {
+  background: linear-gradient(135deg, var(--primary-color), var(--accent-color));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.page-subtitle {
+  font-size: 1rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  max-width: 600px;
+  margin: 0.75rem auto 0;
+  opacity: 0.9;
+}
+
+.upload-container {
+  max-width: 800px;
+  margin: 0 auto 2rem;
+  padding: 0 2rem;
+}
+
+.status-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 1.25rem;
+  border-radius: 1rem;
+  margin-bottom: 1.5rem;
+  background-color: var(--background-secondary);
+  border: 1px solid var(--border-color);
+  transition: all 0.3s ease;
+}
+
+.status-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.status-card.success {
+  border-left: 4px solid var(--success-color);
+}
+
+.status-card.error {
+  border-left: 4px solid var(--danger-color);
+}
+
+.status-icon {
+  font-size: 1.75rem;
+  flex-shrink: 0;
+}
+
+.status-content {
+  flex: 1;
+}
+
+.status-content h3 {
+  font-size: 1.25rem;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+  margin: 0 0 0.5rem;
+}
+
+.status-content p {
+  color: var(--text-secondary);
+  margin: 0 0 0.75rem;
+  font-size: 0.875rem;
+  line-height: 1.4;
+}
+
+.status-actions {
+  margin-top: 0.75rem;
+}
+
+.security-info {
+  background-color: var(--background-secondary);
+  padding: 2rem 0;
+  margin-top: 1.5rem;
+}
+
+.security-info .container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 2rem;
+}
+
+.security-info h2 {
+  text-align: center;
+  font-size: 2rem;
+  font-weight: var(--font-weight-bold);
+  color: var(--text-primary);
+  margin-bottom: 1.5rem;
+}
+
+.security-features {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1rem;
+}
+
+.security-feature {
+  text-align: center;
+  padding: 1.25rem;
+  transition: all 0.3s ease;
+  background-color: var(--background-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 1rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.security-feature:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  border-color: var(--primary-color);
+}
+
+.security-feature .feature-icon {
+  font-size: 1.75rem;
+  color: var(--primary-color);
+  background: rgba(99, 102, 241, 0.1);
+  width: 50px;
+  height: 50px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  margin-bottom: 0.5rem;
+}
+
+.security-feature h3 {
+  font-size: 1.25rem;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.security-feature p {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  margin: 0;
+}
+
+/* Responsive Design */
+@media (max-width: 1024px) {
+  .upload-header {
+    padding: 1.5rem 0;
+  }
+
+  .page-title {
+    font-size: 2rem;
+  }
+
+  .security-info h2 {
+    font-size: 1.75rem;
+  }
+
+  .security-features {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .upload-header {
+    padding: 1.5rem 0;
+  }
+
+  .page-title {
+    font-size: 1.5rem;
+  }
+
+  .page-subtitle {
+    font-size: 0.875rem;
+  }
+
+  .status-card {
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+  }
+
+  .security-info h2 {
+    font-size: 1.5rem;
+  }
+
+  .security-features {
+    grid-template-columns: 1fr;
+  }
+} 
