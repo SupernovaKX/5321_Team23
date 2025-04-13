@@ -26,7 +26,7 @@ const UPLOAD_FILE = gql`
     ) {
       success
       message
-      downloadUrl
+      downloadId
     }
   }
 `;
@@ -38,9 +38,12 @@ const FileUpload = () => {
   const [error, setError] = useState('');
   const [encryptionKey, setEncryptionKey] = useState(null);
   const [uploadStatus, setUploadStatus] = useState(null);
-  const [downloadUrl, setDownloadUrl] = useState(null);
+  const [downloadId, setDownloadId] = useState(null);
   const [maxDownloads, setMaxDownloads] = useState(1);
   const [expiresIn, setExpiresIn] = useState(604800); // 7 days in seconds
+  const [linkCopied, setLinkCopied] = useState(false);
+  const [keyCopied, setKeyCopied] = useState(false);
+
   const [uploadFileMutation] = useMutation(UPLOAD_FILE, {
     onError: (error) => {
       console.error('GraphQL Error:', error);
@@ -120,12 +123,18 @@ const FileUpload = () => {
       setFile(selectedFile);
       setError('');
       setEncryptionKey(null);
+      setUploadStatus(null);
+      setDownloadId(null);
+      setLinkCopied(false);
+      setKeyCopied(false);
     }
   };
 
   // Handle file upload
   const handleUpload = async (file) => {
     try {
+      setUploading(true);
+      setProgress(0);
       console.log('Starting upload...');
       console.log('File info:', {
         name: file.name,
@@ -139,36 +148,24 @@ const FileUpload = () => {
       // Encrypt the file
       const { encryptedData, iv, salt } = await encryptFile(fileBuffer);
       
-      // Create a Blob from the encrypted data
-      const encryptedBlob = new Blob([encryptedData], { type: file.type });
-      
-      // Create a new File object from the Blob
-      const encryptedFile = new File([encryptedBlob], file.name, { type: file.type });
-
       // Upload the file
       const { data } = await uploadFileMutation({
         variables: {
-          file: encryptedFile,
+          file: file, // Send the original file
           originalFilename: file.name,
           mimeType: file.type,
-          size: file.size,
+          size: file.size, // Use original file size
           iv,
           salt,
           maxDownloads,
           expiresIn
-        },
-        context: {
-          headers: {
-            'Apollo-Require-Preflight': 'true',
-            'Content-Type': 'multipart/form-data'
-          }
         }
       });
 
       if (data?.uploadFile?.success) {
         console.log('Upload successful:', data.uploadFile);
         setUploadStatus('success');
-        setDownloadUrl(data.uploadFile.downloadUrl);
+        setDownloadId(data.uploadFile.downloadId);
       } else {
         console.error('Upload failed:', data?.uploadFile?.message);
         setUploadStatus('error');
@@ -178,7 +175,32 @@ const FileUpload = () => {
       console.error('Upload error:', error);
       setUploadStatus('error');
       setError(error.message);
+    } finally {
+      setUploading(false);
     }
+  };
+
+  const handleCopyLink = () => {
+    if (downloadId) {
+      const downloadUrl = `${window.location.origin}/download/${downloadId}`;
+      navigator.clipboard.writeText(downloadUrl);
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2000);
+    }
+  };
+
+  const handleCopyKey = () => {
+    if (encryptionKey) {
+      navigator.clipboard.writeText(encryptionKey);
+      setKeyCopied(true);
+      setTimeout(() => setKeyCopied(false), 2000);
+    }
+  };
+
+  const formatExpirationDate = () => {
+    const date = new Date();
+    date.setSeconds(date.getSeconds() + expiresIn);
+    return date.toLocaleString();
   };
 
   return (
@@ -186,6 +208,7 @@ const FileUpload = () => {
       <h2>Secure File Upload</h2>
       <p>Files will be encrypted in the browser, the server will never see the original file content.</p>
       
+      {!uploadStatus && (
       <div className="upload-area">
         <input
           type="file"
@@ -213,6 +236,7 @@ const FileUpload = () => {
           {uploading ? 'Encrypting...' : 'Encrypt and Upload'}
         </button>
       </div>
+      )}
       
       {uploading && (
         <div className="progress-bar-container">
@@ -223,10 +247,58 @@ const FileUpload = () => {
       
       {error && <div className="error-message">{error}</div>}
       
-      {encryptionKey && (
-        <div className="encryption-key">
-          <p>Encryption Key (Please save securely):</p>
-          <code>{encryptionKey}</code>
+      {uploadStatus === 'success' && downloadId && encryptionKey && (
+        <div className="share-section">
+          <h3>File Successfully Encrypted and Uploaded!</h3>
+          <p>Please send the download link and password separately to the recipient, preferably through different channels</p>
+          
+          <div className="file-info">
+            <p><strong>Filename:</strong> {file.name}</p>
+            <p><strong>Expires:</strong> {formatExpirationDate()}</p>
+          </div>
+          
+          <div className="link-container">
+            <h4>Download Link</h4>
+            <div className="copy-field">
+              <input type="text" value={`${window.location.origin}/download/${downloadId}`} readOnly />
+              <button onClick={handleCopyLink} className="copy-button">
+                {linkCopied ? 'Copied!' : 'Copy Link'}
+              </button>
+            </div>
+            <p className="share-tip">Share this link via email or message</p>
+          </div>
+          
+          <div className="password-container">
+            <h4>Decryption Password</h4>
+            <div className="copy-field">
+              <input type="text" value={encryptionKey} readOnly />
+              <button onClick={handleCopyKey} className="copy-button">
+                {keyCopied ? 'Copied!' : 'Copy Password'}
+              </button>
+            </div>
+            <p className="share-tip"><strong>Security Tip:</strong> Send the password through a different channel (e.g., phone, SMS)</p>
+          </div>
+          
+          <div className="security-note">
+            <h4>Security Notes</h4>
+            <ul>
+              <li>Download link and password are shown only once, copy them immediately</li>
+              <li>For enhanced security, share the link and password through different channels</li>
+              <li>Our servers cannot access your file contents or password</li>
+            </ul>
+          </div>
+          
+          <button 
+            onClick={() => {
+              setFile(null);
+              setUploadStatus(null);
+              setDownloadId(null);
+              setEncryptionKey(null);
+            }}
+            className="upload-new-button"
+          >
+            Upload Another File
+          </button>
         </div>
       )}
     </div>
