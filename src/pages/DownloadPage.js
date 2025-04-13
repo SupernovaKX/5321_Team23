@@ -4,7 +4,7 @@ import '../style.css';
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, gql, useMutation } from '@apollo/client';
-import { decryptFile } from '../services/crypto';
+import { decryptFile, testEncryption, testFullProcess } from '../services/crypto';
 import './DownloadPage.css';
 
 const GET_FILE_METADATA = gql`
@@ -41,18 +41,32 @@ const DownloadPage = () => {
   const [error, setError] = useState('');
   const [isDownloading, setIsDownloading] = useState(false);
   const [fileMetadata, setFileMetadata] = useState(null);
+  const [testResult, setTestResult] = useState('');
+  const [fullTestResult, setFullTestResult] = useState(null);
+  const [loading, setLoading] = useState(true);
 
-  const { loading, error: queryError } = useQuery(GET_FILE_METADATA, {
-    variables: { downloadId },
-    onCompleted: (data) => {
-      if (data?.getFileMetadata) {
-        setFileMetadata(data.getFileMetadata);
+  useEffect(() => {
+    const fetchFileMetadata = async () => {
+      try {
+        const response = await fetch(`http://localhost:4000/api/metadata/${downloadId}`);
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || 'Failed to fetch file metadata');
+        }
+        const metadata = await response.json();
+        console.log('Received metadata:', metadata);
+        setFileMetadata(metadata);
+        setError('');
+      } catch (error) {
+        console.error('Metadata fetch error:', error);
+        setError(error.message || 'Failed to fetch file information. The file may not exist or may have expired.');
+      } finally {
+        setLoading(false);
       }
-    },
-    onError: (error) => {
-      setError('Failed to fetch file information. The file may not exist or may have expired.');
-    }
-  });
+    };
+
+    fetchFileMetadata();
+  }, [downloadId]);
 
   const [downloadFile] = useMutation(DOWNLOAD_FILE, {
     onError: (error) => {
@@ -62,25 +76,32 @@ const DownloadPage = () => {
 
   const handleDownload = async () => {
     try {
+      if (!password) {
+        setError('Please enter the decryption password');
+        return;
+      }
+
+      if (!fileMetadata.iv || !fileMetadata.salt) {
+        throw new Error('Missing encryption parameters. The file may be corrupted.');
+      }
+
       console.log('Starting download process for file:', downloadId);
       console.log('File metadata:', {
         filename: fileMetadata.filename,
         mimeType: fileMetadata.mimeType,
         size: fileMetadata.size,
         hasIv: !!fileMetadata.iv,
-        hasSalt: !!fileMetadata.salt
+        hasSalt: !!fileMetadata.salt,
+        iv: fileMetadata.iv,
+        salt: fileMetadata.salt
       });
 
       setIsDownloading(true);
       setError('');
 
-      // Use fetch to download the file
+      // Use fetch to download the encrypted file
       const response = await fetch(`http://localhost:4000/api/download/${downloadId}`, {
         method: 'GET',
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json'
-        },
         credentials: 'include',
         mode: 'cors'
       });
@@ -99,81 +120,34 @@ const DownloadPage = () => {
         throw new Error(errorMessage);
       }
 
-      const fileData = await response.json();
-      console.log('File data received:', {
-        filename: fileData.filename,
-        mimeType: fileData.mimeType,
-        hasData: !!fileData.data,
-        hasIv: !!fileData.iv,
-        hasSalt: !!fileData.salt
+      // Get the encrypted file as an ArrayBuffer
+      const encryptedData = await response.arrayBuffer();
+      console.log('Encrypted file received:', {
+        size: encryptedData.byteLength,
+        type: response.headers.get('content-type')
       });
 
-      const { filename, mimeType, data: base64Data, iv, salt } = fileData;
-      
-      if (!base64Data || !iv || !salt) {
-        console.error('Missing required data:', { 
-          hasFileData: !!base64Data, 
-          hasIv: !!iv, 
-          hasSalt: !!salt 
-        });
-        throw new Error('Invalid file data received from server');
-      }
-
-      // Convert base64 to binary data
-      console.log('Converting base64 to binary data...');
-      const binaryData = atob(base64Data);
-      const bytes = new Uint8Array(binaryData.length);
-      for (let i = 0; i < binaryData.length; i++) {
-        bytes[i] = binaryData.charCodeAt(i);
-      }
-
-      // Convert the Uint8Array to ArrayBuffer for decryption
-      const encryptedArrayBuffer = bytes.buffer;
-
-      // Log the data sizes for debugging
-      console.log('Data sizes:', {
-        base64Length: base64Data.length,
-        binaryLength: binaryData.length,
-        bytesLength: bytes.length,
-        arrayBufferSize: encryptedArrayBuffer.byteLength
-      });
-
-      // Decrypt the file
+      // Decrypt the file locally
       console.log('Decrypting file with provided password');
-      console.log('Decryption parameters:', {
-        hasEncryptedData: !!encryptedArrayBuffer,
-        encryptedDataSize: encryptedArrayBuffer.byteLength,
-        hasIv: !!iv,
-        hasSalt: !!salt,
-        passwordLength: password.length,
-        passwordFirstChar: password.charAt(0),
-        passwordLastChar: password.charAt(password.length - 1)
-      });
-
-      // Log the IV and salt for debugging
-      console.log('IV and Salt:', {
-        ivLength: iv.length,
-        saltLength: salt.length,
-        ivFirstChar: iv.charAt(0),
-        saltFirstChar: salt.charAt(0)
-      });
-
-      const decryptedData = await decryptFile(encryptedArrayBuffer, password, iv, salt);
+      const decryptedData = await decryptFile(
+        encryptedData,  // Pass the ArrayBuffer directly
+        password,
+        fileMetadata.iv,
+        fileMetadata.salt
+      );
       
       if (!decryptedData) {
-        console.error('Decryption failed: No data returned from decryptFile');
         throw new Error('Failed to decrypt file. Please check your password.');
       }
-      
+
       // Create a blob from the decrypted data
-      console.log('Creating download blob');
-      const blob = new Blob([decryptedData], { type: mimeType });
+      const blob = new Blob([decryptedData], { type: fileMetadata.mimeType });
       
       // Create a download link
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = filename;
+      a.download = fileMetadata.filename;
       document.body.appendChild(a);
       a.click();
       
@@ -181,15 +155,47 @@ const DownloadPage = () => {
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
       
-      console.log('Download completed successfully');
+      console.log('Download and decryption completed successfully');
       
-      // Navigate to success page or show success message
-      navigate('/download/success');
+      // Show success message
+      setError('Download completed successfully! You can close this page or download the file again.');
+      
     } catch (error) {
       console.error('Download error:', error);
       setError(error.message || 'Failed to download or decrypt the file. Please check your password and try again.');
     } finally {
       setIsDownloading(false);
+    }
+  };
+
+  // Helper function to convert ArrayBuffer to base64
+  const arrayBufferToBase64 = (buffer) => {
+    const bytes = new Uint8Array(buffer);
+    let binary = '';
+    for (let i = 0; i < bytes.byteLength; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary);
+  };
+
+  const handleTest = async () => {
+    try {
+      setTestResult('Running test...');
+      const result = await testEncryption();
+      setTestResult(result ? 'Test successful!' : 'Test failed - decrypted text did not match');
+    } catch (error) {
+      setTestResult(`Test failed: ${error.message}`);
+      console.error('Test error:', error);
+    }
+  };
+
+  const handleFullTest = async () => {
+    try {
+      const result = await testFullProcess();
+      setFullTestResult(result);
+    } catch (error) {
+      console.error('Full process test failed:', error);
+      setFullTestResult(false);
     }
   };
   
@@ -204,12 +210,12 @@ const DownloadPage = () => {
     );
   }
   
-  if (queryError || !fileMetadata) {
+  if (error && !fileMetadata) {
     return (
       <div className="download-page">
         <div className="error-container">
           <h2>File Not Found</h2>
-          <p>{error || 'The file you are looking for does not exist or may have expired.'}</p>
+          <p>{error}</p>
           <button className="primary-button" onClick={() => navigate('/')}>
             Return to Home
           </button>
@@ -227,32 +233,41 @@ const DownloadPage = () => {
           <p><strong>Filename:</strong> {fileMetadata.filename}</p>
           <p><strong>Size:</strong> {(fileMetadata.size / 1024 / 1024).toFixed(2)} MB</p>
           <p><strong>Expires:</strong> {new Date(fileMetadata.expiresAt).toLocaleString()}</p>
+          <p><strong>Downloads remaining:</strong> {fileMetadata.maxDownloads - fileMetadata.downloadCount}</p>
         </div>
-        
+
         <div className="password-input">
           <label htmlFor="password">Enter Decryption Password:</label>
-              <input
+          <input
             type="password"
             id="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
             placeholder="Enter the password provided by the sender"
           />
-            </div>
+        </div>
 
-        {error && <div className="error-message">{error}</div>}
+        {error && (
+          <div className={`message ${error.includes('successfully') ? 'success-message' : 'error-message'}`}>
+            {error}
+          </div>
+        )}
 
-            <button 
+        <button 
           className="download-button"
           onClick={handleDownload}
           disabled={!password || isDownloading}
         >
           {isDownloading ? 'Downloading...' : 'Download & Decrypt'}
-            </button>
+        </button>
         
         <div className="security-note">
           <p>This file is protected by end-to-end encryption. The server never sees your password or the file contents.</p>
         </div>
+
+        <button className="primary-button" onClick={() => navigate('/')} style={{ marginTop: '20px' }}>
+          Return to Home
+        </button>
       </div>
     </div>
   );

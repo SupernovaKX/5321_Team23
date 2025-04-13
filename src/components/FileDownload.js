@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
-import { downloadEncryptedFile } from '../services/api';
+import { downloadEncryptedFile, getFileMetadata } from '../services/api';
 import { decryptFile } from '../services/crypto';
 
 const FileDownload = () => {
@@ -17,12 +17,25 @@ const FileDownload = () => {
   useEffect(() => {
     const fetchFileInfo = async () => {
       try {
-        // 只获取文件元数据，此时还不下载实际文件
-        const metadata = await downloadEncryptedFile(downloadId);
+        const metadata = await getFileMetadata(downloadId);
+        if (!metadata) {
+          throw new Error('File not found');
+        }
+        
+        // Check if file has expired
+        if (new Date(metadata.expiresAt) < new Date()) {
+          throw new Error('File has expired');
+        }
+        
+        // Check if download limit reached
+        if (metadata.downloadCount >= metadata.maxDownloads) {
+          throw new Error('Maximum downloads reached');
+        }
+        
         setFileInfo(metadata);
         setError('');
       } catch (err) {
-        setError('无法加载文件信息: ' + (err.message || '链接可能已过期或无效'));
+        setError(err.message || 'Failed to load file information');
       } finally {
         setLoading(false);
       }
@@ -33,7 +46,7 @@ const FileDownload = () => {
   
   const handleDecrypt = async () => {
     if (!password) {
-      setDecryptError('请输入解密密码');
+      setDecryptError('Please enter decryption password');
       return;
     }
     
@@ -41,74 +54,80 @@ const FileDownload = () => {
       setDecrypting(true);
       setDecryptError('');
       
-      // 解密文件
+      // Download the encrypted file
+      const { encryptedFile } = await downloadEncryptedFile(downloadId);
+      
+      // Decrypt the file
       const { file, fileName } = await decryptFile(
-        fileInfo.encryptedFile,
-        fileInfo.metadata,
+        encryptedFile,
+        {
+          iv: fileInfo.iv,
+          salt: fileInfo.salt
+        },
         password
       );
       
-      // 创建下载链接
+      // Create download link
       const downloadUrl = URL.createObjectURL(file);
-      
-      // 创建一个临时链接并模拟点击以下载文件
       const downloadLink = document.createElement('a');
       downloadLink.href = downloadUrl;
-      downloadLink.download = fileName;
+      downloadLink.download = fileInfo.filename;
       document.body.appendChild(downloadLink);
       downloadLink.click();
       document.body.removeChild(downloadLink);
       
-      // 释放URL对象
+      // Clean up
       setTimeout(() => URL.revokeObjectURL(downloadUrl), 100);
       
     } catch (err) {
-      console.error('解密失败:', err);
-      setDecryptError('解密失败: ' + (err.message || '密码可能不正确'));
+      console.error('Decryption failed:', err);
+      setDecryptError(err.message || 'Decryption failed. Please check your password.');
     } finally {
       setDecrypting(false);
     }
   };
   
   if (loading) {
-    return <div className="loading">加载文件信息...</div>;
+    return <div className="loading">Loading file information...</div>;
   }
   
   if (error) {
     return (
       <div className="error-container">
-        <h2>出错了</h2>
+        <h2>Error</h2>
         <p>{error}</p>
-        <p>请检查您的链接是否完整，或联系文件发送者获取新链接。</p>
+        <p>Please check your link or contact the file sender for a new link.</p>
       </div>
     );
   }
   
   return (
     <div className="file-download-container">
-      <h2>安全文件下载</h2>
+      <h2>Secure File Download</h2>
       
       <div className="file-info">
-        <p><strong>文件名:</strong> {fileInfo.metadata.originalName}</p>
-        <p><strong>大小:</strong> {(fileInfo.metadata.originalSize / 1024 / 1024).toFixed(2)} MB</p>
+        <p><strong>Filename:</strong> {fileInfo.filename}</p>
+        <p><strong>Size:</strong> {(fileInfo.size / 1024 / 1024).toFixed(2)} MB</p>
+        <p><strong>Expires:</strong> {new Date(fileInfo.expiresAt).toLocaleString()}</p>
+        <p><strong>Downloads remaining:</strong> {fileInfo.maxDownloads - fileInfo.downloadCount}</p>
       </div>
       
       <div className="decrypt-section">
-        <h3>输入解密密码</h3>
-        <p>请输入发送者提供的密码以解密并下载文件</p>
+        <h3>Enter Decryption Password</h3>
+        <p>Please enter the password provided by the sender to decrypt and download the file</p>
         
         <div className="password-input">
           <input
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            placeholder="输入解密密码"
+            placeholder="Enter decryption password"
           />
           <button 
             onClick={handleDecrypt}
             disabled={decrypting}
           >
-            {decrypting ? '解密中...' : '解密并下载'}
+            {decrypting ? 'Decrypting...' : 'Decrypt and Download'}
           </button>
         </div>
         
@@ -116,10 +135,10 @@ const FileDownload = () => {
       </div>
       
       <div className="security-note">
-        <h3>安全提示</h3>
+        <h3>Security Note</h3>
         <ul>
-          <li>文件在您的浏览器中解密，密码不会发送到服务器</li>
-          <li>如果您忘记了密码，请联系文件发送者</li>
+          <li>Files are decrypted in your browser - the password is never sent to the server</li>
+          <li>If you've forgotten the password, please contact the file sender</li>
         </ul>
       </div>
     </div>

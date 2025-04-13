@@ -40,8 +40,8 @@ const FileUpload = ({ onUploadComplete }) => {
   const [encryptionKey, setEncryptionKey] = useState(null);
   const [uploadStatus, setUploadStatus] = useState(null);
   const [downloadId, setDownloadId] = useState(null);
-  const [maxDownloads, setMaxDownloads] = useState(5);
-  const [expiresIn, setExpiresIn] = useState(604800); // 7 days in seconds
+  const [maxDownloads] = useState(5);
+  const [expiresIn] = useState(604800); // 7 days in seconds
   const [linkCopied, setLinkCopied] = useState(false);
   const [keyCopied, setKeyCopied] = useState(false);
 
@@ -110,7 +110,7 @@ const FileUpload = ({ onUploadComplete }) => {
       // Encrypt the file
       const { encryptedData, iv, salt } = await encryptFile(fileBuffer, password);
       
-      // Create a Blob from the encrypted data
+      // Create a Blob from the encrypted data (already in binary form)
       const encryptedBlob = new Blob([encryptedData], { type: 'application/octet-stream' });
       
       // Create a new File object from the Blob
@@ -120,44 +120,61 @@ const FileUpload = ({ onUploadComplete }) => {
       let retries = 3;
       let lastError = null;
 
+      const attemptUpload = async () => {
+        // The encrypted data is already in binary form, so we can use its size directly
+        const actualSize = encryptedData.byteLength;
+        
+        if (typeof actualSize !== 'number' || isNaN(actualSize)) {
+          throw new Error('Invalid file size');
+        }
+
+        console.log('File size details:', {
+          originalSize: file.size,
+          encryptedSize: actualSize
+        });
+
+        const { data } = await uploadFileMutation({
+          variables: {
+            file: encryptedFile,
+            originalFilename: file.name,
+            mimeType: file.type || 'application/octet-stream',
+            size: actualSize,
+            iv: iv,
+            salt: salt,
+            maxDownloads: maxDownloads,
+            expiresIn: expiresIn
+          },
+          context: {
+            headers: {
+              'Apollo-Require-Preflight': 'true',
+              'Content-Type': 'multipart/form-data'
+            }
+          }
+        });
+
+        if (data?.uploadFile?.success) {
+          console.log('Upload successful:', data.uploadFile);
+          setUploadStatus('success');
+          setDownloadId(data.uploadFile.downloadId);
+          if (onUploadComplete) {
+            onUploadComplete({
+              downloadUrl: `${window.location.origin}/download/${data.uploadFile.downloadId}`,
+              downloadId: data.uploadFile.downloadId,
+              password: password,
+              originalFileName: file.name,
+              expiresAt: new Date(Date.now() + expiresIn * 1000)
+            });
+          }
+          return true;
+        } else {
+          throw new Error(data?.uploadFile?.message || 'Upload failed');
+        }
+      };
+
       while (retries > 0) {
         try {
-          const { data } = await uploadFileMutation({
-            variables: {
-              file: encryptedFile,
-              originalFilename: file.name,
-              mimeType: file.type || 'application/octet-stream',
-              size: encryptedData.length,
-              iv,
-              salt,
-              maxDownloads,
-              expiresIn
-            },
-            context: {
-              headers: {
-                'Apollo-Require-Preflight': 'true',
-                'Content-Type': 'multipart/form-data'
-              }
-            }
-          });
-
-          if (data?.uploadFile?.success) {
-            console.log('Upload successful:', data.uploadFile);
-            setUploadStatus('success');
-            setDownloadId(data.uploadFile.downloadId);
-            if (onUploadComplete) {
-              onUploadComplete({
-                downloadUrl: `${window.location.origin}/download/${data.uploadFile.downloadId}`,
-                downloadId: data.uploadFile.downloadId,
-                password: password,
-                originalFileName: file.name,
-                expiresAt: new Date(Date.now() + expiresIn * 1000)
-              });
-            }
-            return; // Success, exit the retry loop
-          } else {
-            throw new Error(data?.uploadFile?.message || 'Upload failed');
-          }
+          const success = await attemptUpload();
+          if (success) return;
         } catch (error) {
           lastError = error;
           console.error(`Upload attempt ${4 - retries} failed:`, error);
