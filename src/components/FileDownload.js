@@ -1,145 +1,172 @@
 // src/components/FileDownload.js
 
 import React, { useState, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
-import { downloadEncryptedFile, getFileMetadata } from '../services/api';
+import '../styles/theme.css';
+import './FileDownload.css';
 import { decryptFile } from '../services/crypto';
 
-const FileDownload = () => {
-  const { downloadId } = useParams();
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [fileInfo, setFileInfo] = useState(null);
+const FileDownload = ({ fileId, onDownloadComplete }) => {
+  const [fileMetadata, setFileMetadata] = useState(null);
   const [password, setPassword] = useState('');
-  const [decrypting, setDecrypting] = useState(false);
-  const [decryptError, setDecryptError] = useState('');
-  
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [copied, setCopied] = useState(false);
+
   useEffect(() => {
-    const fetchFileInfo = async () => {
+    const fetchFileMetadata = async () => {
       try {
-        const metadata = await getFileMetadata(downloadId);
-        if (!metadata) {
-          throw new Error('File not found');
+        console.log('Fetching metadata for fileId:', fileId);
+        if (!fileId) {
+          throw new Error('No file ID provided');
         }
-        
-        // Check if file has expired
-        if (new Date(metadata.expiresAt) < new Date()) {
-          throw new Error('File has expired');
+        const response = await fetch(`http://localhost:4000/api/metadata/${fileId}`);
+        if (!response.ok) {
+          const errorData = await response.json();
+          if (response.status === 404) {
+            throw new Error('File not found');
+          } else if (response.status === 410) {
+            throw new Error('File has expired');
+          } else if (response.status === 403) {
+            throw new Error('Maximum downloads reached');
+          } else {
+            throw new Error('Failed to fetch file metadata');
+          }
         }
-        
-        // Check if download limit reached
-        if (metadata.downloadCount >= metadata.maxDownloads) {
-          throw new Error('Maximum downloads reached');
-        }
-        
-        setFileInfo(metadata);
-        setError('');
-      } catch (err) {
-        setError(err.message || 'Failed to load file information');
+        const data = await response.json();
+        setFileMetadata(data);
+      } catch (error) {
+        console.error('Error fetching metadata:', error);
+        setError(error.message);
+        onDownloadComplete({
+          type: 'error',
+          title: 'Error',
+          message: error.message
+        });
       } finally {
         setLoading(false);
       }
     };
-    
-    fetchFileInfo();
-  }, [downloadId]);
-  
-  const handleDecrypt = async () => {
-    if (!password) {
-      setDecryptError('Please enter decryption password');
-      return;
-    }
-    
+
+    fetchFileMetadata();
+  }, [fileId, onDownloadComplete]);
+
+  const handleDownload = async () => {
     try {
-      setDecrypting(true);
-      setDecryptError('');
-      
-      // Download the encrypted file
-      const { encryptedFile } = await downloadEncryptedFile(downloadId);
-      
-      // Decrypt the file
-      const { file, fileName } = await decryptFile(
-        encryptedFile,
-        {
-          iv: fileInfo.iv,
-          salt: fileInfo.salt
-        },
-        password
+      if (!password) {
+        setError('Please enter the decryption password');
+        return;
+      }
+
+      if (!fileMetadata.iv || !fileMetadata.salt) {
+        throw new Error('Missing encryption parameters. The file may be corrupted.');
+      }
+
+      setIsDownloading(true);
+      setError('');
+
+      const response = await fetch(`http://localhost:4000/api/download/${fileId}`, {
+        method: 'GET',
+        credentials: 'include',
+        mode: 'cors'
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        let errorMessage;
+        try {
+          const errorData = JSON.parse(errorText);
+          errorMessage = errorData.error || 'Failed to download file';
+        } catch (e) {
+          errorMessage = `Server error: ${response.status} ${response.statusText}`;
+        }
+        throw new Error(errorMessage);
+      }
+
+      const encryptedData = await response.arrayBuffer();
+      const decryptedData = await decryptFile(
+        encryptedData,
+        password,
+        fileMetadata.iv,
+        fileMetadata.salt
       );
-      
-      // Create download link
-      const downloadUrl = URL.createObjectURL(file);
-      const downloadLink = document.createElement('a');
-      downloadLink.href = downloadUrl;
-      downloadLink.download = fileInfo.filename;
-      document.body.appendChild(downloadLink);
-      downloadLink.click();
-      document.body.removeChild(downloadLink);
-      
-      // Clean up
-      setTimeout(() => URL.revokeObjectURL(downloadUrl), 100);
-      
-    } catch (err) {
-      console.error('Decryption failed:', err);
-      setDecryptError(err.message || 'Decryption failed. Please check your password.');
+
+      const blob = new Blob([decryptedData], { type: fileMetadata.mimeType });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileMetadata.filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      onDownloadComplete({
+        type: 'success',
+        title: 'File Downloaded Successfully',
+        message: 'Your file has been decrypted and downloaded securely.'
+      });
+
+      setPassword('');
+    } catch (error) {
+      setError(error.message || 'Failed to download file');
+      onDownloadComplete({
+        type: 'error',
+        title: 'Download Failed',
+        message: error.message || 'There was an error downloading your file. Please try again.'
+      });
     } finally {
-      setDecrypting(false);
+      setIsDownloading(false);
     }
   };
-  
+
   if (loading) {
-    return <div className="loading">Loading file information...</div>;
+    return (
+      <div className="loading-container">
+        <div className="spinner"></div>
+        <p>Loading file information...</p>
+      </div>
+    );
   }
-  
-  if (error) {
+
+  if (error && !fileMetadata) {
     return (
       <div className="error-container">
-        <h2>Error</h2>
+        <div className="error-icon">❌</div>
+        <h3>Error</h3>
         <p>{error}</p>
         <p>Please check your link or contact the file sender for a new link.</p>
       </div>
     );
   }
-  
+
   return (
-    <div className="file-download-container">
-      <h2>Secure File Download</h2>
-      
-      <div className="file-info">
-        <p><strong>Filename:</strong> {fileInfo.filename}</p>
-        <p><strong>Size:</strong> {(fileInfo.size / 1024 / 1024).toFixed(2)} MB</p>
-        <p><strong>Expires:</strong> {new Date(fileInfo.expiresAt).toLocaleString()}</p>
-        <p><strong>Downloads remaining:</strong> {fileInfo.maxDownloads - fileInfo.downloadCount}</p>
+    <div className="file-download">
+      <div className="download-info">
+        <h3>File Information</h3>
+        <p>File Name: {fileMetadata.filename}</p>
+        <p>File Size: {(fileMetadata.size / 1024 / 1024).toFixed(2)} MB</p>
+        <p>Expires: {new Date(fileMetadata.expiresAt).toLocaleString()}</p>
       </div>
       
-      <div className="decrypt-section">
-        <h3>Enter Decryption Password</h3>
-        <p>Please enter the password provided by the sender to decrypt and download the file</p>
-        
-        <div className="password-input">
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="Enter decryption password"
-          />
-          <button 
-            onClick={handleDecrypt}
-            disabled={decrypting}
-          >
-            {decrypting ? 'Decrypting...' : 'Decrypt and Download'}
-          </button>
-        </div>
-        
-        {decryptError && <div className="error-message">{decryptError}</div>}
-      </div>
-      
-      <div className="security-note">
-        <h3>Security Note</h3>
-        <ul>
-          <li>Files are decrypted in your browser - the password is never sent to the server</li>
-          <li>If you've forgotten the password, please contact the file sender</li>
-        </ul>
+      <div className="password-input-container">
+        <h3>Decryption Password</h3>
+        <p>Enter the password provided by the file sender:</p>
+        <input
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="Enter decryption password"
+          className="password-input"
+        />
+        {error && <p className="error-message">{error}</p>}
+        <button
+          onClick={handleDownload}
+          disabled={isDownloading || !password}
+          className="btn btn-primary"
+        >
+          {isDownloading ? 'Downloading...' : 'Download File'}
+        </button>
       </div>
     </div>
   );
