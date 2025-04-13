@@ -53,64 +53,39 @@ export const deriveKey = async (password) => {
   return { key: derivedKey, salt };
 };
 
-// 加密文件
-export const encryptFile = async (fileData, password) => {
+// 文件加密函数
+export const encryptFile = async (file, password) => {
   try {
-    console.log('Starting encryption');
-    
-    // Generate encryption key and salt
-    const encoder = new TextEncoder();
-    const passwordBuffer = encoder.encode(password);
-    
-    // Import password as raw key material
-    const importedKey = await window.crypto.subtle.importKey(
-      'raw',
-      passwordBuffer,
-      { name: 'PBKDF2' },
-      false,
-      ['deriveKey']
-    );
-    
-    // Generate salt
-    const salt = window.crypto.getRandomValues(new Uint8Array(16));
-    
-    // Derive key using PBKDF2
-    const key = await window.crypto.subtle.deriveKey(
-      {
-        name: 'PBKDF2',
-        salt,
-        iterations: 100000,
-        hash: 'SHA-256'
-      },
-      importedKey,
-      { name: 'AES-GCM', length: 256 },
-      false,
-      ['encrypt']
-    );
-    
-    // Generate IV
+    // 生成加密密钥和初始化向量
+    const { key, salt } = await deriveKey(password);
     const iv = window.crypto.getRandomValues(new Uint8Array(12));
     
-    // Encrypt the data
-    const encryptedData = await window.crypto.subtle.encrypt(
+    // 读取文件内容为 ArrayBuffer
+    const fileBuffer = await file.arrayBuffer();
+    
+    // 使用 AES-GCM 加密
+    const encryptedBuffer = await window.crypto.subtle.encrypt(
       {
         name: 'AES-GCM',
         iv
       },
       key,
-      fileData
+      fileBuffer
     );
     
-    console.log('Encryption successful');
+    // 创建加密后的文件对象
+    const encryptedFile = new Blob([encryptedBuffer]);
     
-    // Convert to base64 for storage
-    const encryptedArray = new Uint8Array(encryptedData);
-    const encryptedBase64 = btoa(String.fromCharCode(...encryptedArray));
-    
+    // 返回加密文件和元数据
     return {
-      encryptedData: encryptedBase64,
-      iv: btoa(String.fromCharCode(...iv)),
-      salt: btoa(String.fromCharCode(...salt))
+      encryptedFile,
+      metadata: {
+        salt: Array.from(salt),
+        iv: Array.from(iv),
+        originalName: file.name,
+        originalType: file.type,
+        originalSize: file.size
+      }
     };
   } catch (error) {
     console.error('Encryption error:', error);

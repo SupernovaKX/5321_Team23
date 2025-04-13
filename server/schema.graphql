@@ -19,6 +19,7 @@ type File {
   downloadCount: Int!
   maxDownloads: Int
   isExpired: Boolean!
+  content: String # 添加文件内容字段
 }
 
 """
@@ -36,9 +37,14 @@ Query type
 """
 type Query {
   """
+  Download file
+  """
+  downloadFile(downloadId: String!): File
+  
+  """
   Get file metadata
   """
-  fileMetadata(downloadId: String!): File
+  getFileMetadata(downloadId: String!): File
   
   """
   Get file list (optional, for management)

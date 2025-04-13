@@ -4,6 +4,10 @@ import { useMutation } from '@apollo/client';
 import { gql } from '@apollo/client';
 import { generatePassword, encryptFile } from '../services/crypto';
 
+if (!window.crypto || !window.crypto.subtle) {
+  throw new Error('Web Crypto API is not supported in this browser');
+}
+
 const UPLOAD_FILE = gql`
   mutation UploadFile(
     $file: Upload!
@@ -84,59 +88,52 @@ const FileUpload = () => {
 
   // Handle file upload
   const handleUpload = async (file) => {
+    if (!file) {
+      setError('Please select a file');
+      return;
+    }
+
     try {
       setUploading(true);
-      setProgress(0);
-      console.log('Starting upload...');
-      console.log('File info:', {
-        name: file.name,
-        size: file.size,
-        type: file.type
-      });
-
-      // Read the file as ArrayBuffer
-      const fileBuffer = await file.arrayBuffer();
+      setProgress(10);
       
-      // Generate a random password
+      // 生成随机密码
       const password = generatePassword();
-      setEncryptionKey(password);
       
-      // Encrypt the file
-      const { encryptedData, iv, salt } = await encryptFile(fileBuffer, password);
+      // 加密文件
+      const { encryptedFile, metadata } = await encryptFile(file, password);
+      setProgress(50);
       
-      // Create a Blob from the encrypted data
-      const encryptedBlob = new Blob([encryptedData], { type: 'application/octet-stream' });
-      
-      // Create a new File object from the Blob
-      const encryptedFile = new File([encryptedBlob], file.name, { type: 'application/octet-stream' });
+      // 准备上传变量
+      const variables = {
+        file: encryptedFile,
+        originalFilename: file.name,
+        mimeType: file.type || 'application/octet-stream',
+        size: file.size,
+        iv: metadata.iv.join(','),
+        salt: metadata.salt.join(','),
+        maxDownloads: 1,
+        expiresIn: 7 * 24 * 60 * 60 // 7天
+      };
 
-      // Upload the file
+      // 上传到服务器
       const { data } = await uploadFileMutation({
-        variables: {
-          file: encryptedFile,
-          originalFilename: file.name,
-          mimeType: file.type,
-          size: encryptedData.length,
-          iv,
-          salt,
-          maxDownloads,
-          expiresIn
-        }
+        variables
       });
+      setProgress(90);
 
       if (data?.uploadFile?.success) {
-        console.log('Upload successful:', data.uploadFile);
+        setProgress(100);
         setUploadStatus('success');
         setDownloadId(data.uploadFile.downloadId);
+        setEncryptionKey(password);
       } else {
-        console.error('Upload failed:', data?.uploadFile?.message);
-        setUploadStatus('error');
-        setError(data?.uploadFile?.message || 'Upload failed');
+        throw new Error(data?.uploadFile?.message || 'Upload failed');
       }
     } catch (error) {
       console.error('Upload error:', error);
-      setUploadStatus('error');
       setError(error.message);
+      setProgress(0);
     } finally {
       setUploading(false);
     }

@@ -9,6 +9,7 @@ const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { gql } = require('apollo-server');
 
 // Environment configuration
 const PORT = process.env.PORT || 4000;
@@ -55,6 +56,7 @@ const typeDefs = `
     expiresAt: String!
     maxDownloads: Int
     downloadCount: Int
+    data: String  # 添加用于传输文件数据的字段
   }
 
   type UploadFileResponse {
@@ -66,6 +68,7 @@ const typeDefs = `
   type Query {
     getFile(downloadId: String!): File
     getFileMetadata(downloadId: String!): File
+    downloadFile(downloadId: String!): File!  # 添加下载查询
   }
 
   type Mutation {
@@ -79,8 +82,6 @@ const typeDefs = `
       maxDownloads: Int
       expiresIn: Int
     ): UploadFileResponse!
-    
-    downloadFile(downloadId: String!): File!
   }
 `;
 
@@ -100,6 +101,59 @@ const resolvers = {
         throw new Error('File not found');
       }
       return file;
+    },
+    downloadFile: async (_, { downloadId }) => {
+      try {
+        console.log('开始处理文件下载请求:', downloadId);
+        
+        // 从数据库获取文件信息
+        const file = await db.collection('files').findOne({ downloadId });
+        if (!file) {
+          throw new Error('文件不存在');
+        }
+
+        // 检查文件是否过期
+        if (new Date(file.expiresAt) < new Date()) {
+          throw new Error('文件已过期');
+        }
+
+        // 检查下载次数限制
+        if (file.maxDownloads && file.downloadCount >= file.maxDownloads) {
+          throw new Error('已达到最大下载次数限制');
+        }
+
+        // 读取文件内容
+        const filePath = path.join(UPLOAD_DIR, downloadId);
+        if (!fs.existsSync(filePath)) {
+          throw new Error('文件不存在于存储系统中');
+        }
+
+        // 以 base64 格式读取文件
+        const fileData = fs.readFileSync(filePath);
+        const base64Data = fileData.toString('base64');
+
+        // 更新下载计数
+        await db.collection('files').updateOne(
+          { downloadId },
+          { $inc: { downloadCount: 1 } }
+        );
+
+        console.log('文件下载成功:', {
+          filename: file.filename,
+          size: fileData.length,
+          downloadCount: file.downloadCount + 1
+        });
+
+        // 返回文件信息和内容
+        return {
+          ...file,
+          data: base64Data
+        };
+
+      } catch (error) {
+        console.error('文件下载错误:', error);
+        throw new Error(`文件下载失败: ${error.message}`);
+      }
     }
   },
   Mutation: {
@@ -190,80 +244,23 @@ const resolvers = {
           downloadId: null
         };
       }
-    },
-    downloadFile: async (_, { downloadId }) => {
-      try {
-        console.log('Download request for file:', downloadId);
-        const file = await db.collection('files').findOne({ downloadId });
-        
-        if (!file) {
-          console.log('File not found in database');
-          throw new Error('File not found');
-        }
-
-        console.log('Found file in database:', {
-          filename: file.filename,
-          mimeType: file.mimeType,
-          size: file.size,
-          hasIv: !!file.iv,
-          hasSalt: !!file.salt,
-          downloadCount: file.downloadCount,
-          maxDownloads: file.maxDownloads
-        });
-
-        // Check if file is expired
-        if (new Date(file.expiresAt) < new Date()) {
-          console.log('File has expired:', file.expiresAt);
-          throw new Error('File has expired');
-        }
-
-        // Check download limit
-        if (file.maxDownloads && file.downloadCount >= file.maxDownloads) {
-          console.log('Download limit reached:', file.downloadCount, '/', file.maxDownloads);
-          throw new Error('Maximum download limit reached');
-        }
-
-        // Increment download count
-        await db.collection('files').updateOne(
-          { downloadId },
-          { $inc: { downloadCount: 1 } }
-        );
-
-        // Read the file
-        const filePath = path.join(UPLOAD_DIR, file.downloadId);
-        console.log('Reading file from path:', filePath);
-        
-        if (!fs.existsSync(filePath)) {
-          console.log('File not found on disk:', filePath);
-          throw new Error('File not found on disk');
-        }
-
-        const fileData = fs.readFileSync(filePath);
-        console.log('File read successfully, size:', fileData.length);
-
-        if (fileData.length === 0) {
-          console.log('File is empty');
-          throw new Error('File is empty');
-        }
-
-        // Return file data and metadata
-        const response = {
-          filename: file.filename,
-          mimeType: file.mimeType,
-          data: fileData.toString('base64'),
-          iv: file.iv,
-          salt: file.salt
-        };
-
-        console.log('Returning response with data length:', response.data.length);
-        return response;
-      } catch (error) {
-        console.error('Download error:', error);
-        throw error;
-      }
     }
   }
 };
+
+// GraphQL query for downloading a file
+const DOWNLOAD_FILE = gql`
+  query DownloadFile($downloadId: String!) {
+    downloadFile(downloadId: $downloadId) {
+      filename
+      mimeType
+      size
+      data
+      iv
+      salt
+    }
+  }
+`;
 
 // Create Express application
 const app = express();
@@ -272,6 +269,9 @@ async function startServer() {
   // Create Apollo Server instance
   const server = new ApolloServer({
     schema: makeExecutableSchema({ typeDefs, resolvers }),
+    csrfPrevention: true,
+    cache: 'bounded',
+    cors: false, // 让 express 处理 CORS
     formatError: (error) => {
       console.error('GraphQL Error:', error);
       return error;
@@ -283,11 +283,10 @@ async function startServer() {
 
   // Middleware configuration
   app.use(cors({
-    origin: 'http://localhost:3000',
+    origin: ['http://localhost:3000', 'http://localhost:4000'],
     credentials: true,
     methods: ['GET', 'POST', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Apollo-Require-Preflight'],
-    exposedHeaders: ['Content-Disposition']
   }));
 
   // Add CSP headers
@@ -323,6 +322,17 @@ async function startServer() {
 
   // Static file service (for file downloads)
   app.use('/uploads', express.static(UPLOAD_DIR));
+
+  // Example usage of the downloadFile query
+  async function exampleDownloadFile(downloadId) {
+    const { data } = await downloadFile({
+      variables: { downloadId }
+    });
+
+    // 解码文件数据
+    const fileContent = atob(data.downloadFile.data);
+    console.log('Decoded file content:', fileContent);
+  }
 
   // Start server
   app.listen(PORT, () => {
