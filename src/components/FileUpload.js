@@ -27,11 +27,6 @@ const UPLOAD_FILE = gql`
       success
       message
       downloadUrl
-      file {
-        downloadId
-        filename
-        expiresAt
-      }
     }
   }
 `;
@@ -42,7 +37,28 @@ const FileUpload = () => {
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState('');
   const [encryptionKey, setEncryptionKey] = useState(null);
-  const [uploadFile] = useMutation(UPLOAD_FILE);
+  const [uploadStatus, setUploadStatus] = useState(null);
+  const [downloadUrl, setDownloadUrl] = useState(null);
+  const [maxDownloads, setMaxDownloads] = useState(1);
+  const [expiresIn, setExpiresIn] = useState(604800); // 7 days in seconds
+  const [uploadFileMutation] = useMutation(UPLOAD_FILE, {
+    onError: (error) => {
+      console.error('GraphQL Error:', error);
+      if (error.networkError) {
+        console.error('Network Error:', error.networkError);
+        if (error.networkError.message.includes('Content-Security-Policy')) {
+          setError('Security policy error. Please check your browser settings or try a different browser.');
+        } else {
+          setError('Network error occurred. Please check your connection and try again.');
+        }
+      } else if (error.graphQLErrors) {
+        console.error('GraphQL Errors:', error.graphQLErrors);
+        setError('Server error occurred. Please try again later.');
+      } else {
+        setError('An unexpected error occurred. Please try again.');
+      }
+    }
+  });
 
   // Generate random encryption key
   const generateKey = async () => {
@@ -108,69 +124,60 @@ const FileUpload = () => {
   };
 
   // Handle file upload
-  const handleUpload = async () => {
-    if (!file) {
-      setError('Please select a file to upload');
-      return;
-    }
-
-    setUploading(true);
-    setProgress(0);
-    setError('');
-
+  const handleUpload = async (file) => {
     try {
-      setProgress(20);
-      const fileReader = new FileReader();
+      console.log('Starting upload...');
+      console.log('File info:', {
+        name: file.name,
+        size: file.size,
+        type: file.type
+      });
+
+      // Read the file as ArrayBuffer
+      const fileBuffer = await file.arrayBuffer();
       
-      fileReader.onload = async (e) => {
-        try {
-          setProgress(40);
-          const { encryptedData, iv, salt } = await encryptFile(e.target.result);
-          setProgress(60);
-          
-          // Create encrypted file object
-          const encryptedFile = new Blob([encryptedData], { 
-            type: 'application/octet-stream' 
-          });
+      // Encrypt the file
+      const { encryptedData, iv, salt } = await encryptFile(fileBuffer);
+      
+      // Create a Blob from the encrypted data
+      const encryptedBlob = new Blob([encryptedData], { type: file.type });
+      
+      // Create a new File object from the Blob
+      const encryptedFile = new File([encryptedBlob], file.name, { type: file.type });
 
-          // Upload to server
-          const response = await uploadFile({
-            variables: {
-              file: encryptedFile,
-              originalFilename: file.name,
-              mimeType: file.type || 'application/octet-stream',
-              size: file.size,
-              iv: iv,
-              salt: salt,
-              maxDownloads: 1, // Default to allow only one download
-              expiresIn: 604800 // Default 7 days expiration
-            }
-          });
-
-          if (response.data.uploadFile.success) {
-            setProgress(100);
-            alert('File encrypted and uploaded successfully! Please save your encryption key, it will be needed to decrypt the file.');
-          } else {
-            throw new Error(response.data.uploadFile.message || 'Upload failed');
+      // Upload the file
+      const { data } = await uploadFileMutation({
+        variables: {
+          file: encryptedFile,
+          originalFilename: file.name,
+          mimeType: file.type,
+          size: file.size,
+          iv,
+          salt,
+          maxDownloads,
+          expiresIn
+        },
+        context: {
+          headers: {
+            'Apollo-Require-Preflight': 'true',
+            'Content-Type': 'multipart/form-data'
           }
-          
-        } catch (error) {
-          setError(error.message);
-        } finally {
-          setUploading(false);
         }
-      };
+      });
 
-      fileReader.onerror = () => {
-        setError('File reading failed');
-        setUploading(false);
-      };
-
-      fileReader.readAsArrayBuffer(file);
-
+      if (data?.uploadFile?.success) {
+        console.log('Upload successful:', data.uploadFile);
+        setUploadStatus('success');
+        setDownloadUrl(data.uploadFile.downloadUrl);
+      } else {
+        console.error('Upload failed:', data?.uploadFile?.message);
+        setUploadStatus('error');
+        setError(data?.uploadFile?.message || 'Upload failed');
+      }
     } catch (error) {
-      setError('Upload process error: ' + error.message);
-      setUploading(false);
+      console.error('Upload error:', error);
+      setUploadStatus('error');
+      setError(error.message);
     }
   };
 
@@ -199,7 +206,7 @@ const FileUpload = () => {
         )}
         
         <button 
-          onClick={handleUpload} 
+          onClick={() => handleUpload(file)} 
           disabled={!file || uploading} 
           className="upload-button"
         >

@@ -20,9 +20,26 @@ const client = new ApolloClient({
     credentials: 'include',
     headers: {
       'Apollo-Require-Preflight': 'true'
+    },
+    fetchOptions: {
+      mode: 'cors',
+      credentials: 'include'
     }
   }),
-  cache: new InMemoryCache()
+  cache: new InMemoryCache(),
+  defaultOptions: {
+    watchQuery: {
+      fetchPolicy: 'network-only',
+      errorPolicy: 'all'
+    },
+    query: {
+      fetchPolicy: 'network-only',
+      errorPolicy: 'all'
+    },
+    mutate: {
+      errorPolicy: 'all'
+    }
+  }
 });
 
 function App() {

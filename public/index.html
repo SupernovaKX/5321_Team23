@@ -22,7 +22,7 @@
   <meta property="twitter:description" content="使用端到端加密技术安全分享文件，保护您的隐私。文件在浏览器中加密，服务器永远不会看到您的文件内容或密钥。">
   <meta property="twitter:image" content="%PUBLIC_URL%/og-image.jpg">
   <!-- Security headers -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' http://localhost:3000 http://localhost:4000; connect-src 'self' http://localhost:3000 http://localhost:4000; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;">
   <meta name="referrer" content="strict-origin-when-cross-origin">
   <meta http-equiv="X-Content-Type-Options" content="nosniff">
 </head>
