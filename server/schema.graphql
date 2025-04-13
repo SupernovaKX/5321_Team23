@@ -8,11 +8,17 @@ type File {
   id: ID!
   downloadId: String!
   filename: String!
-  metadata: String!
+  originalFilename: String!
   mimeType: String!
   size: Int!
+  encryptedSize: Int!
+  iv: String!  # Initialization vector for encryption
+  salt: String!  # Salt used in encryption
   createdAt: DateTime!
   expiresAt: DateTime!
+  downloadCount: Int!
+  maxDownloads: Int
+  isExpired: Boolean!
 }
 
 """
@@ -22,6 +28,7 @@ type UploadResponse {
   success: Boolean!
   message: String
   file: File
+  downloadUrl: String!
 }
 
 """
@@ -44,11 +51,16 @@ Mutation type
 """
 type Mutation {
   """
-  Upload file
+  Upload encrypted file
   """
   uploadFile(
     file: Upload!
-    metadata: String!
+    originalFilename: String!
+    mimeType: String!
+    size: Int!
+    iv: String!
+    salt: String!
+    maxDownloads: Int
     expiresIn: Int = 604800  # Default 7 days
   ): UploadResponse!
   
