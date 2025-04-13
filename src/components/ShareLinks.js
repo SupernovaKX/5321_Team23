@@ -26,8 +26,8 @@ const ShareLinks = ({ downloadUrl, password, expiresAt, originalFileName }) => {
   };
 
   return (
-    <div className="share-links-container">
-      <h2>File Successfully Encrypted and Uploaded!</h2>
+    <div className="share-section">
+      <h3>File Successfully Encrypted and Uploaded!</h3>
       <p>Please send the download link and password separately to the recipient, preferably through different channels</p>
       
       <div className="file-info">
@@ -36,10 +36,10 @@ const ShareLinks = ({ downloadUrl, password, expiresAt, originalFileName }) => {
       </div>
       
       <div className="link-container">
-        <h3>Download Link</h3>
+        <h4>Download Link</h4>
         <div className="copy-field">
           <input type="text" value={downloadUrl} readOnly />
-          <button onClick={handleCopyLink}>
+          <button onClick={handleCopyLink} className="copy-button">
             {linkCopied ? 'Copied!' : 'Copy Link'}
           </button>
         </div>
@@ -47,10 +47,10 @@ const ShareLinks = ({ downloadUrl, password, expiresAt, originalFileName }) => {
       </div>
       
       <div className="password-container">
-        <h3>Decryption Password</h3>
+        <h4>Decryption Password</h4>
         <div className="copy-field">
           <input type="text" value={password} readOnly />
-          <button onClick={handleCopyPassword}>
+          <button onClick={handleCopyPassword} className="copy-button">
             {passwordCopied ? 'Copied!' : 'Copy Password'}
           </button>
         </div>
@@ -58,7 +58,7 @@ const ShareLinks = ({ downloadUrl, password, expiresAt, originalFileName }) => {
       </div>
       
       <div className="security-note">
-        <h3>Security Notes</h3>
+        <h4>Security Notes</h4>
         <ul>
           <li>Download link and password are shown only once, copy them immediately</li>
           <li>For enhanced security, share the link and password through different channels</li>

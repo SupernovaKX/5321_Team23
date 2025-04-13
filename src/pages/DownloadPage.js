@@ -74,48 +74,102 @@ const DownloadPage = () => {
       setIsDownloading(true);
       setError('');
 
-      console.log('Starting download for file:', downloadId);
-      
-      // Download the file using GraphQL
-      const { data, error: graphQLError } = await downloadFile({
-        variables: { downloadId }
+      // Use fetch to download the file
+      const response = await fetch(`http://localhost:4000/api/download/${downloadId}`, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        },
+        credentials: 'include',
+        mode: 'cors'
       });
 
-      console.log('Received response from server:', {
-        hasData: !!data.downloadFile,
-        hasFileData: !!data.downloadFile.data,
-        dataLength: data.downloadFile.data?.length,
-        hasIv: !!data.downloadFile.iv,
-        hasSalt: !!data.downloadFile.salt
+      // Check if the response is ok
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Server error response:', errorText);
+        let errorMessage;
+        try {
+          const errorData = JSON.parse(errorText);
+          errorMessage = errorData.error || 'Failed to download file';
+        } catch (e) {
+          errorMessage = `Server error: ${response.status} ${response.statusText}`;
+        }
+        throw new Error(errorMessage);
+      }
+
+      const fileData = await response.json();
+      console.log('File data received:', {
+        filename: fileData.filename,
+        mimeType: fileData.mimeType,
+        hasData: !!fileData.data,
+        hasIv: !!fileData.iv,
+        hasSalt: !!fileData.salt
       });
 
-      if (graphQLError) {
-        console.error('GraphQL error:', graphQLError);
-        throw new Error(graphQLError.message || 'Failed to download file');
-      }
-
-      if (!data.downloadFile || !data.downloadFile.data) {
-        console.error('No file data in response');
-        throw new Error('Failed to download file: No data received');
-      }
-
-      const { filename, mimeType, data: encryptedData, iv, salt } = data.downloadFile;
+      const { filename, mimeType, data: base64Data, iv, salt } = fileData;
       
-      if (!encryptedData || !iv || !salt) {
-        console.error('Missing required data:', { hasFileData: !!encryptedData, hasIv: !!iv, hasSalt: !!salt });
+      if (!base64Data || !iv || !salt) {
+        console.error('Missing required data:', { 
+          hasFileData: !!base64Data, 
+          hasIv: !!iv, 
+          hasSalt: !!salt 
+        });
         throw new Error('Invalid file data received from server');
       }
 
+      // Convert base64 to binary data
+      console.log('Converting base64 to binary data...');
+      const binaryData = atob(base64Data);
+      const bytes = new Uint8Array(binaryData.length);
+      for (let i = 0; i < binaryData.length; i++) {
+        bytes[i] = binaryData.charCodeAt(i);
+      }
+
+      // Convert the Uint8Array to ArrayBuffer for decryption
+      const encryptedArrayBuffer = bytes.buffer;
+
+      // Log the data sizes for debugging
+      console.log('Data sizes:', {
+        base64Length: base64Data.length,
+        binaryLength: binaryData.length,
+        bytesLength: bytes.length,
+        arrayBufferSize: encryptedArrayBuffer.byteLength
+      });
+
       // Decrypt the file
       console.log('Decrypting file with provided password');
-      const decryptedData = await decryptFile(encryptedData, password, iv, salt);
+      console.log('Decryption parameters:', {
+        hasEncryptedData: !!encryptedArrayBuffer,
+        encryptedDataSize: encryptedArrayBuffer.byteLength,
+        hasIv: !!iv,
+        hasSalt: !!salt,
+        passwordLength: password.length,
+        passwordFirstChar: password.charAt(0),
+        passwordLastChar: password.charAt(password.length - 1)
+      });
+
+      // Log the IV and salt for debugging
+      console.log('IV and Salt:', {
+        ivLength: iv.length,
+        saltLength: salt.length,
+        ivFirstChar: iv.charAt(0),
+        saltFirstChar: salt.charAt(0)
+      });
+
+      const decryptedData = await decryptFile(encryptedArrayBuffer, password, iv, salt);
+      
+      if (!decryptedData) {
+        console.error('Decryption failed: No data returned from decryptFile');
+        throw new Error('Failed to decrypt file. Please check your password.');
+      }
       
       // Create a blob from the decrypted data
-      console.log('File decrypted successfully, creating download link');
+      console.log('Creating download blob');
       const blob = new Blob([decryptedData], { type: mimeType });
       
       // Create a download link
-      console.log('Creating download link');
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
