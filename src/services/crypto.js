@@ -89,13 +89,14 @@ export const encryptFile = async (fileData, password) => {
     );
     
     // Generate IV
-    const iv = window.crypto.getRandomValues(new Uint8Array(12));
+    const iv = window.crypto.getRandomValues(new Uint8Array(16));
     
     // Encrypt the data
     const encryptedData = await window.crypto.subtle.encrypt(
       {
         name: 'AES-GCM',
-        iv
+        iv,
+        tagLength: 128
       },
       key,
       fileData
@@ -123,9 +124,40 @@ export const decryptFile = async (encryptedData, password, ivBase64, saltBase64)
   try {
     console.log('Starting decryption with provided parameters');
     
+    // Log the base64 strings for debugging
+    console.log('Base64 strings:', {
+      ivBase64Length: ivBase64.length,
+      saltBase64Length: saltBase64.length,
+      ivBase64FirstChar: ivBase64.charAt(0),
+      saltBase64FirstChar: saltBase64.charAt(0)
+    });
+    
     // Convert base64 strings to ArrayBuffers
-    const iv = Uint8Array.from(atob(ivBase64), c => c.charCodeAt(0));
-    const salt = Uint8Array.from(atob(saltBase64), c => c.charCodeAt(0));
+    const ivBinary = atob(ivBase64);
+    const saltBinary = atob(saltBase64);
+    
+    // Create fixed-size arrays for IV and salt
+    const iv = new Uint8Array(16);  // AES-GCM uses 16-byte IV
+    const salt = new Uint8Array(16);  // PBKDF2 uses 16-byte salt
+    
+    // Copy the binary data into the fixed-size arrays
+    for (let i = 0; i < Math.min(ivBinary.length, 16); i++) {
+      iv[i] = ivBinary.charCodeAt(i);
+    }
+    
+    for (let i = 0; i < Math.min(saltBinary.length, 16); i++) {
+      salt[i] = saltBinary.charCodeAt(i);
+    }
+    
+    console.log('Decryption parameters:', {
+      ivLength: iv.length,
+      saltLength: salt.length,
+      encryptedDataLength: encryptedData.byteLength,
+      ivFirstByte: iv[0],
+      saltFirstByte: salt[0],
+      ivBinaryLength: ivBinary.length,
+      saltBinaryLength: saltBinary.length
+    });
     
     // Convert password to ArrayBuffer
     const encoder = new TextEncoder();
@@ -158,7 +190,8 @@ export const decryptFile = async (encryptedData, password, ivBase64, saltBase64)
     const decryptedData = await window.crypto.subtle.decrypt(
       {
         name: 'AES-GCM',
-        iv
+        iv,
+        tagLength: 128
       },
       key,
       encryptedData

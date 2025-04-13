@@ -32,7 +32,7 @@ const UPLOAD_FILE = gql`
   }
 `;
 
-const FileUpload = () => {
+const FileUpload = ({ onUploadComplete }) => {
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -40,7 +40,7 @@ const FileUpload = () => {
   const [encryptionKey, setEncryptionKey] = useState(null);
   const [uploadStatus, setUploadStatus] = useState(null);
   const [downloadId, setDownloadId] = useState(null);
-  const [maxDownloads, setMaxDownloads] = useState(1);
+  const [maxDownloads, setMaxDownloads] = useState(5);
   const [expiresIn, setExpiresIn] = useState(604800); // 7 days in seconds
   const [linkCopied, setLinkCopied] = useState(false);
   const [keyCopied, setKeyCopied] = useState(false);
@@ -60,6 +60,11 @@ const FileUpload = () => {
         setError('Server error occurred. Please try again later.');
       } else {
         setError('An unexpected error occurred. Please try again.');
+      }
+    },
+    context: {
+      headers: {
+        'Apollo-Require-Preflight': 'true'
       }
     }
   });
@@ -87,6 +92,7 @@ const FileUpload = () => {
     try {
       setUploading(true);
       setProgress(0);
+      setError('');
       console.log('Starting upload...');
       console.log('File info:', {
         name: file.name,
@@ -110,33 +116,65 @@ const FileUpload = () => {
       // Create a new File object from the Blob
       const encryptedFile = new File([encryptedBlob], file.name, { type: 'application/octet-stream' });
 
-      // Upload the file
-      const { data } = await uploadFileMutation({
-        variables: {
-          file: encryptedFile,
-          originalFilename: file.name,
-          mimeType: file.type,
-          size: encryptedData.length,
-          iv,
-          salt,
-          maxDownloads,
-          expiresIn
-        }
-      });
+      // Upload the file with retry logic
+      let retries = 3;
+      let lastError = null;
 
-      if (data?.uploadFile?.success) {
-        console.log('Upload successful:', data.uploadFile);
-        setUploadStatus('success');
-        setDownloadId(data.uploadFile.downloadId);
-      } else {
-        console.error('Upload failed:', data?.uploadFile?.message);
-        setUploadStatus('error');
-        setError(data?.uploadFile?.message || 'Upload failed');
+      while (retries > 0) {
+        try {
+          const { data } = await uploadFileMutation({
+            variables: {
+              file: encryptedFile,
+              originalFilename: file.name,
+              mimeType: file.type || 'application/octet-stream',
+              size: encryptedData.length,
+              iv,
+              salt,
+              maxDownloads,
+              expiresIn
+            },
+            context: {
+              headers: {
+                'Apollo-Require-Preflight': 'true',
+                'Content-Type': 'multipart/form-data'
+              }
+            }
+          });
+
+          if (data?.uploadFile?.success) {
+            console.log('Upload successful:', data.uploadFile);
+            setUploadStatus('success');
+            setDownloadId(data.uploadFile.downloadId);
+            if (onUploadComplete) {
+              onUploadComplete({
+                downloadUrl: `${window.location.origin}/download/${data.uploadFile.downloadId}`,
+                downloadId: data.uploadFile.downloadId,
+                password: password,
+                originalFileName: file.name,
+                expiresAt: new Date(Date.now() + expiresIn * 1000)
+              });
+            }
+            return; // Success, exit the retry loop
+          } else {
+            throw new Error(data?.uploadFile?.message || 'Upload failed');
+          }
+        } catch (error) {
+          lastError = error;
+          console.error(`Upload attempt ${4 - retries} failed:`, error);
+          retries--;
+          if (retries > 0) {
+            // Wait before retrying (exponential backoff)
+            await new Promise(resolve => setTimeout(resolve, Math.pow(2, 3 - retries) * 1000));
+          }
+        }
       }
+
+      // If we get here, all retries failed
+      throw lastError || new Error('Upload failed after multiple attempts');
     } catch (error) {
       console.error('Upload error:', error);
       setUploadStatus('error');
-      setError(error.message);
+      setError(error.message || 'Failed to upload file');
     } finally {
       setUploading(false);
     }
@@ -171,33 +209,33 @@ const FileUpload = () => {
       <p>Files will be encrypted in the browser, the server will never see the original file content.</p>
       
       {!uploadStatus && (
-      <div className="upload-area">
-        <input
-          type="file"
-          id="file-input"
-          onChange={handleFileChange}
-          disabled={uploading}
-        />
-        <label htmlFor="file-input" className="file-input-label">
-          {file ? file.name : 'Select File'}
-        </label>
-        
-        {file && (
-          <div className="file-info">
-            <p>Filename: {file.name}</p>
-            <p>Size: {(file.size / 1024 / 1024).toFixed(2)} MB</p>
-            <p>Type: {file.type || 'Unknown'}</p>
-          </div>
-        )}
-        
-        <button 
-          onClick={() => handleUpload(file)} 
-          disabled={!file || uploading} 
-          className="upload-button"
-        >
-          {uploading ? 'Encrypting...' : 'Encrypt and Upload'}
-        </button>
-      </div>
+        <div className="upload-area">
+          <input
+            type="file"
+            id="file-input"
+            onChange={handleFileChange}
+            disabled={uploading}
+          />
+          <label htmlFor="file-input" className="file-input-label">
+            {file ? file.name : 'Select File'}
+          </label>
+          
+          {file && (
+            <div className="file-info">
+              <p>Filename: {file.name}</p>
+              <p>Size: {(file.size / 1024 / 1024).toFixed(2)} MB</p>
+              <p>Type: {file.type || 'Unknown'}</p>
+            </div>
+          )}
+          
+          <button 
+            onClick={() => handleUpload(file)} 
+            disabled={!file || uploading} 
+            className="upload-button"
+          >
+            {uploading ? 'Encrypting...' : 'Encrypt and Upload'}
+          </button>
+        </div>
       )}
       
       {uploading && (
@@ -209,37 +247,49 @@ const FileUpload = () => {
       
       {error && <div className="error-message">{error}</div>}
       
-      {uploadStatus === 'success' && downloadId && encryptionKey && (
+      {uploadStatus === 'success' && (
         <div className="share-section">
           <h3>File Successfully Encrypted and Uploaded!</h3>
           <p>Please send the download link and password separately to the recipient, preferably through different channels</p>
           
           <div className="file-info">
-            <p><strong>Filename:</strong> {file.name}</p>
+            <p><strong>Filename:</strong> {file?.name}</p>
             <p><strong>Expires:</strong> {formatExpirationDate()}</p>
           </div>
           
-          <div className="link-container">
-            <h4>Download Link</h4>
-            <div className="copy-field">
-              <input type="text" value={`${window.location.origin}/download/${downloadId}`} readOnly />
-              <button onClick={handleCopyLink} className="copy-button">
-                {linkCopied ? 'Copied!' : 'Copy Link'}
-              </button>
+          {downloadId && (
+            <div className="link-container">
+              <h4>Download Link</h4>
+              <div className="copy-field">
+                <input 
+                  type="text" 
+                  value={`${window.location.origin}/download/${downloadId}`} 
+                  readOnly 
+                />
+                <button onClick={handleCopyLink} className="copy-button">
+                  {linkCopied ? 'Copied!' : 'Copy Link'}
+                </button>
+              </div>
+              <p className="share-tip">Share this link via email or message</p>
             </div>
-            <p className="share-tip">Share this link via email or message</p>
-          </div>
+          )}
           
-          <div className="password-container">
-            <h4>Decryption Password</h4>
-            <div className="copy-field">
-              <input type="text" value={encryptionKey} readOnly />
-              <button onClick={handleCopyKey} className="copy-button">
-                {keyCopied ? 'Copied!' : 'Copy Password'}
-              </button>
+          {encryptionKey && (
+            <div className="password-container">
+              <h4>Decryption Password</h4>
+              <div className="copy-field">
+                <input 
+                  type="text" 
+                  value={encryptionKey} 
+                  readOnly 
+                />
+                <button onClick={handleCopyKey} className="copy-button">
+                  {keyCopied ? 'Copied!' : 'Copy Password'}
+                </button>
+              </div>
+              <p className="share-tip"><strong>Security Tip:</strong> Send the password through a different channel (e.g., phone, SMS)</p>
             </div>
-            <p className="share-tip"><strong>Security Tip:</strong> Send the password through a different channel (e.g., phone, SMS)</p>
-          </div>
+          )}
           
           <div className="security-note">
             <h4>Security Notes</h4>

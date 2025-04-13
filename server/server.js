@@ -9,6 +9,7 @@ const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const fetch = require('node-fetch');
 
 // Environment configuration
 const PORT = process.env.PORT || 4000;
@@ -113,6 +114,10 @@ const resolvers = {
           hasSalt: !!salt
         });
 
+        if (!file) {
+          throw new Error('No file provided');
+        }
+
         const { createReadStream } = await file;
         
         // Generate a unique download ID
@@ -124,7 +129,7 @@ const resolvers = {
         console.log('Saving file to:', filePath);
         
         // Create a write stream
-        const writeStream = fs.createWriteStream(filePath);
+        const writeStream = fs.createWriteStream(filePath, { encoding: 'binary' });
         
         // Pipe the file stream to the write stream
         await new Promise((resolve, reject) => {
@@ -186,77 +191,19 @@ const resolvers = {
         console.error('Upload error:', error);
         return {
           success: false,
-          message: error.message,
+          message: error.message || 'Failed to upload file',
           downloadId: null
         };
       }
     },
     downloadFile: async (_, { downloadId }) => {
       try {
-        console.log('Download request for file:', downloadId);
-        const file = await db.collection('files').findOne({ downloadId });
-        
-        if (!file) {
-          console.log('File not found in database');
-          throw new Error('File not found');
+        const response = await fetch(`http://localhost:${PORT}/api/download/${downloadId}`);
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || 'Failed to download file');
         }
-
-        console.log('Found file in database:', {
-          filename: file.filename,
-          mimeType: file.mimeType,
-          size: file.size,
-          hasIv: !!file.iv,
-          hasSalt: !!file.salt,
-          downloadCount: file.downloadCount,
-          maxDownloads: file.maxDownloads
-        });
-
-        // Check if file is expired
-        if (new Date(file.expiresAt) < new Date()) {
-          console.log('File has expired:', file.expiresAt);
-          throw new Error('File has expired');
-        }
-
-        // Check download limit
-        if (file.maxDownloads && file.downloadCount >= file.maxDownloads) {
-          console.log('Download limit reached:', file.downloadCount, '/', file.maxDownloads);
-          throw new Error('Maximum download limit reached');
-        }
-
-        // Increment download count
-        await db.collection('files').updateOne(
-          { downloadId },
-          { $inc: { downloadCount: 1 } }
-        );
-
-        // Read the file
-        const filePath = path.join(UPLOAD_DIR, file.downloadId);
-        console.log('Reading file from path:', filePath);
-        
-        if (!fs.existsSync(filePath)) {
-          console.log('File not found on disk:', filePath);
-          throw new Error('File not found on disk');
-        }
-
-        const fileData = fs.readFileSync(filePath);
-        console.log('File read successfully, size:', fileData.length);
-
-        if (fileData.length === 0) {
-          console.log('File is empty');
-          throw new Error('File is empty');
-        }
-
-        // Return file data and metadata
-        const response = {
-          filename: file.filename,
-          mimeType: file.mimeType,
-          data: fileData.toString('base64'),
-          iv: file.iv,
-          salt: file.salt
-        };
-
-        console.log('Returning response with data length:', response.data.length);
-        return response;
+        return await response.json();
       } catch (error) {
         console.error('Download error:', error);
         throw error;
@@ -268,6 +215,108 @@ const resolvers = {
 // Create Express application
 const app = express();
 
+// Configure CORS
+const corsOptions = {
+  origin: process.env.NODE_ENV === 'production' 
+    ? process.env.CLIENT_URL 
+    : 'http://localhost:3000',
+  credentials: true,
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Apollo-Require-Preflight'],
+  exposedHeaders: ['Content-Type', 'Authorization'],
+  optionsSuccessStatus: 200
+};
+
+// Add middleware
+app.use(express.json({ limit: '100mb' }));
+app.use(express.urlencoded({ extended: true, limit: '100mb' }));
+app.use(cors(corsOptions));
+
+// Configure file upload middleware
+app.use(graphqlUploadExpress({
+  maxFileSize: 100 * 1024 * 1024, // 100MB
+  maxFiles: 1
+}));
+
+// Add file download endpoint
+app.get('/api/download/:downloadId', async (req, res) => {
+  // Set CORS headers for this specific endpoint
+  res.setHeader('Access-Control-Allow-Origin', 'http://localhost:3000');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Apollo-Require-Preflight');
+
+  try {
+    const { downloadId } = req.params;
+    
+    // Get file metadata from database
+    const file = await db.collection('files').findOne({ downloadId });
+    if (!file) {
+      return res.status(404).json({ error: 'File not found' });
+    }
+    
+    // Check if file has expired
+    if (new Date(file.expiresAt) < new Date()) {
+      return res.status(410).json({ error: 'File has expired' });
+    }
+    
+    // Check download count
+    if (file.downloadCount >= file.maxDownloads) {
+      return res.status(403).json({ error: 'Maximum download limit reached' });
+    }
+    
+    // Read the encrypted file
+    const filePath = path.join(UPLOAD_DIR, downloadId);
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: 'File not found on disk' });
+    }
+    
+    // Read file data and convert to base64
+    const fileData = fs.readFileSync(filePath);
+    const base64Data = fileData.toString('base64');
+    
+    // Increment download count
+    await db.collection('files').updateOne(
+      { downloadId },
+      { $inc: { downloadCount: 1 } }
+    );
+    
+    // Send response with file data
+    res.json({
+      filename: file.filename,
+      mimeType: file.mimeType,
+      data: base64Data,
+      iv: file.iv,
+      salt: file.salt
+    });
+  } catch (error) {
+    console.error('Download error:', error);
+    res.status(500).json({ error: error.message || 'Failed to download file' });
+  }
+});
+
+// Add endpoint to reset download count
+app.post('/api/reset-downloads/:downloadId', cors(corsOptions), async (req, res) => {
+  try {
+    const { downloadId } = req.params;
+    console.log('Resetting download count for file:', downloadId);
+    
+    const result = await db.collection('files').updateOne(
+      { downloadId },
+      { $set: { downloadCount: 0 } }
+    );
+    
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ error: 'File not found' });
+    }
+    
+    res.json({ success: true, message: 'Download count reset successfully' });
+  } catch (error) {
+    console.error('Reset download count error:', error);
+    res.status(500).json({ error: 'Failed to reset download count' });
+  }
+});
+
 async function startServer() {
   // Create Apollo Server instance
   const server = new ApolloServer({
@@ -275,43 +324,27 @@ async function startServer() {
     formatError: (error) => {
       console.error('GraphQL Error:', error);
       return error;
-    }
+    },
+    csrfPrevention: true,
+    cache: 'bounded',
+    plugins: [
+      {
+        async requestDidStart() {
+          return {
+            async willSendResponse({ response }) {
+              response.http.headers.set('Access-Control-Allow-Origin', corsOptions.origin);
+              response.http.headers.set('Access-Control-Allow-Credentials', 'true');
+            }
+          };
+        }
+      }
+    ]
   });
 
   // Start Apollo Server
   await server.start();
 
-  // Middleware configuration
-  app.use(cors({
-    origin: 'http://localhost:3000',
-    credentials: true,
-    methods: ['GET', 'POST', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Apollo-Require-Preflight'],
-    exposedHeaders: ['Content-Disposition']
-  }));
-
-  // Add CSP headers
-  app.use((req, res, next) => {
-    res.setHeader(
-      'Content-Security-Policy',
-      "default-src 'self' http://localhost:3000 http://localhost:4000; connect-src 'self' http://localhost:3000 http://localhost:4000;"
-    );
-    next();
-  });
-
-  app.use(express.json({ limit: '100mb' }));
-  app.use(express.urlencoded({ limit: '100mb', extended: true }));
-  
-  // File upload middleware
-  app.use(graphqlUploadExpress({
-    maxFileSize: 100000000, // 100MB
-    maxFiles: 1,
-    maxFieldSize: 100000000, // 100MB
-    maxRequestSize: 100000000, // 100MB
-    uploadDir: UPLOAD_DIR
-  }));
-
-  // GraphQL route
+  // Apply middleware
   app.use('/graphql', expressMiddleware(server, {
     context: async ({ req }) => {
       return {
@@ -321,19 +354,13 @@ async function startServer() {
     }
   }));
 
-  // Static file service (for file downloads)
-  app.use('/uploads', express.static(UPLOAD_DIR));
-
-  // Start server
+  // Start the server
   app.listen(PORT, () => {
-    console.log(`
-      🚀 Server ready at http://localhost:${PORT}/graphql
-      📁 Encrypted file storage enabled
-      🔒 End-to-end encryption ready
-    `);
+    console.log(`Server running at http://localhost:${PORT}`);
   });
 }
 
+// Start the server
 connectToDatabase()
   .then(() => startServer())
   .catch(console.error);
