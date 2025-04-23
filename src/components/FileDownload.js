@@ -10,8 +10,7 @@ const FileDownload = ({ fileId, onDownloadComplete }) => {
   const [password, setPassword] = useState('');
   const [isDownloading, setIsDownloading] = useState(false);
   const [error, setError] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [copied, setCopied] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     const fetchFileMetadata = async () => {
@@ -20,9 +19,8 @@ const FileDownload = ({ fileId, onDownloadComplete }) => {
         if (!fileId) {
           throw new Error('No file ID provided');
         }
-        const response = await fetch(`http://localhost:4000/api/metadata/${fileId}`);
+        const response = await fetch(`${process.env.REACT_APP_BASE_URL}/api/metadata/${fileId}`);
         if (!response.ok) {
-          const errorData = await response.json();
           if (response.status === 404) {
             throw new Error('File not found');
           } else if (response.status === 410) {
@@ -37,7 +35,7 @@ const FileDownload = ({ fileId, onDownloadComplete }) => {
         setFileMetadata(data);
       } catch (error) {
         console.error('Error fetching metadata:', error);
-        setError(error.message);
+        setError('Failed to fetch file metadata');
         onDownloadComplete({
           type: 'error',
           title: 'Error',
@@ -65,7 +63,7 @@ const FileDownload = ({ fileId, onDownloadComplete }) => {
       setIsDownloading(true);
       setError('');
 
-      const response = await fetch(`http://localhost:4000/api/download/${fileId}`, {
+      const response = await fetch(`${process.env.REACT_APP_BASE_URL}/api/download/${fileId}`, {
         method: 'GET',
         credentials: 'include',
         mode: 'cors'

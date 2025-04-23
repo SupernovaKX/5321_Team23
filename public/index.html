@@ -22,7 +22,7 @@
   <meta property="twitter:description" content="Securely share files using end-to-end encryption technology to protect your privacy. Files are encrypted in the browser, and the server never sees your file contents or keys.">
   <meta property="twitter:image" content="%PUBLIC_URL%/og-image.jpg">
   <!-- Security headers -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self' http://localhost:3000 http://localhost:4000; connect-src 'self' http://localhost:3000 http://localhost:4000; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' %REACT_APP_BASE_URL%; connect-src 'self' %REACT_APP_BASE_URL% %REACT_APP_GRAPHQL_ENDPOINT%; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; frame-ancestors 'none'; form-action 'self'; base-uri 'self'; object-src 'none'; media-src 'self'; worker-src 'self' blob:;">
   <meta name="referrer" content="strict-origin-when-cross-origin">
   <meta http-equiv="X-Content-Type-Options" content="nosniff">
 </head>

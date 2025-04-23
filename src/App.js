@@ -16,7 +16,7 @@ import Navbar from './components/Navbar';
 // Create Apollo Client
 const client = new ApolloClient({
   link: createUploadLink({
-    uri: process.env.REACT_APP_GRAPHQL_ENDPOINT || 'http://localhost:4000/graphql',
+    uri: process.env.REACT_APP_GRAPHQL_ENDPOINT,
     credentials: 'include',
     headers: {
       'Apollo-Require-Preflight': 'true'

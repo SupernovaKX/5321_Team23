@@ -349,20 +349,6 @@ function saferBase64ToArrayBuffer(base64) {
   }
 }
 
-// Convert string to ArrayBuffer (for direct binary interpretation)
-function stringToArrayBuffer(str) {
-  if (!str) {
-    throw new Error('String is undefined or null');
-  }
-
-  const buffer = new ArrayBuffer(str.length);
-  const bytes = new Uint8Array(buffer);
-  for (let i = 0; i < str.length; i++) {
-    bytes[i] = str.charCodeAt(i);
-  }
-  return buffer;
-}
-
 // Helper function for ArrayBuffer to base64 conversion
 function arrayBufferToBase64(buffer) {
   if (!buffer) {

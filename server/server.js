@@ -1,3 +1,6 @@
+// Load environment variables
+require('dotenv').config();
+
 const express = require('express');
 const { ApolloServer } = require('@apollo/server');
 const { expressMiddleware } = require('@apollo/server/express4');
@@ -13,9 +16,86 @@ const fetch = require('node-fetch');
 
 // Environment configuration
 const PORT = process.env.PORT || 4000;
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017';
-const DB_NAME = 'encrypted_file_storage';
+const MONGODB_URI = process.env.MONGODB_URI;
+const DB_NAME = process.env.DB_NAME || 'encrypted_file_storage';
 const UPLOAD_DIR = path.join(__dirname, '../uploads');
+
+// Log environment variables (for debugging)
+console.log('Environment variables:');
+console.log('REACT_APP_BASE_URL:', process.env.REACT_APP_BASE_URL);
+console.log('REACT_APP_GRAPHQL_ENDPOINT:', process.env.REACT_APP_GRAPHQL_ENDPOINT);
+console.log('MONGODB_URI:', process.env.MONGODB_URI);
+console.log('DB_NAME:', process.env.DB_NAME);
+
+if (!MONGODB_URI) {
+  console.error('Missing required environment variable: MONGODB_URI');
+  process.exit(1);
+}
+
+// CORS configuration
+const corsOptions = {
+  origin: (origin, callback) => {
+    const allowedOrigins = [process.env.REACT_APP_BASE_URL];
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'x-apollo-operation-name',
+    'apollo-require-preflight',
+    'Access-Control-Allow-Origin',
+    'Access-Control-Allow-Credentials'
+  ],
+  exposedHeaders: ['Content-Length', 'Content-Type'],
+  maxAge: 86400 // 24 hours
+};
+
+// Use CORS middleware
+const app = express();
+app.use(cors(corsOptions));
+
+// Handle preflight requests
+app.options('*', cors(corsOptions));
+
+// Add CSP headers
+app.use((req, res, next) => {
+  const baseUrl = process.env.REACT_APP_BASE_URL;
+  const apiUrl = process.env.REACT_APP_GRAPHQL_ENDPOINT;
+  
+  if (!baseUrl || !apiUrl) {
+    console.error('Missing required environment variables: REACT_APP_BASE_URL and/or REACT_APP_GRAPHQL_ENDPOINT');
+    return res.status(500).send('Server configuration error');
+  }
+  
+  // Set CORS headers
+  res.setHeader('Access-Control-Allow-Origin', baseUrl);
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-apollo-operation-name, apollo-require-preflight');
+  
+  res.setHeader(
+    'Content-Security-Policy',
+    `default-src 'self'; ` +
+    `connect-src 'self' ${baseUrl} ${apiUrl}; ` +
+    `script-src 'self' 'unsafe-inline' 'unsafe-eval'; ` +
+    `style-src 'self' 'unsafe-inline'; ` +
+    `img-src 'self' data:; ` +
+    `font-src 'self' data:; ` +
+    `frame-ancestors 'none'; ` +
+    `form-action 'self'; ` +
+    `base-uri 'self'; ` +
+    `object-src 'none'; ` +
+    `media-src 'self'; ` +
+    `worker-src 'self' blob:;`
+  );
+  next();
+});
 
 // Ensure upload directory exists
 if (!fs.existsSync(UPLOAD_DIR)) {
@@ -277,7 +357,8 @@ const resolvers = {
     },
     downloadFile: async (_, { downloadId }) => {
       try {
-        const response = await fetch(`http://localhost:${PORT}/api/download/${downloadId}`);
+        const apiUrl = process.env.REACT_APP_GRAPHQL_ENDPOINT.replace('/graphql', '');
+        const response = await fetch(`${apiUrl}/api/download/${downloadId}`);
         if (!response.ok) {
           const error = await response.json();
           throw new Error(error.error || 'Failed to download file');
@@ -291,25 +372,9 @@ const resolvers = {
   }
 };
 
-// Create Express application
-const app = express();
-
-// Configure CORS
-const corsOptions = {
-  origin: process.env.NODE_ENV === 'production' 
-    ? process.env.CLIENT_URL 
-    : 'http://localhost:3000',
-  credentials: true,
-  methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Apollo-Require-Preflight'],
-  exposedHeaders: ['Content-Type', 'Authorization'],
-  optionsSuccessStatus: 200
-};
-
 // Add middleware
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ extended: true, limit: '100mb' }));
-app.use(cors(corsOptions));
 
 // Configure file upload middleware
 app.use(graphqlUploadExpress({
@@ -461,15 +526,20 @@ async function startServer() {
       console.error('GraphQL Error:', error);
       return error;
     },
-    csrfPrevention: true,
+    csrfPrevention: {
+      requestHeaders: ['x-apollo-operation-name', 'apollo-require-preflight']
+    },
     cache: 'bounded',
     plugins: [
       {
         async requestDidStart() {
           return {
             async willSendResponse({ response }) {
-              response.http.headers.set('Access-Control-Allow-Origin', corsOptions.origin);
+              // Set CORS headers for GraphQL responses
+              response.http.headers.set('Access-Control-Allow-Origin', process.env.REACT_APP_BASE_URL);
               response.http.headers.set('Access-Control-Allow-Credentials', 'true');
+              response.http.headers.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+              response.http.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-apollo-operation-name, apollo-require-preflight');
             }
           };
         }
@@ -480,8 +550,8 @@ async function startServer() {
   // Start Apollo Server
   await server.start();
 
-  // Apply middleware
-  app.use('/graphql', expressMiddleware(server, {
+  // Apply middleware with proper CORS handling
+  app.use('/graphql', cors(corsOptions), expressMiddleware(server, {
     context: async ({ req }) => {
       return {
         headers: req.headers,
@@ -492,7 +562,7 @@ async function startServer() {
 
   // Start the server
   app.listen(PORT, () => {
-    console.log(`Server running at http://localhost:${PORT}`);
+    console.log(`Server running at ${process.env.REACT_APP_GRAPHQL_ENDPOINT.replace('/graphql', '')}`);
   });
 }
 
