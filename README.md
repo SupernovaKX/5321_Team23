@@ -1,4 +1,4 @@
-# 5321_Team23
+# 5321_Team23 SecureShare
 
 ## Project Setup
 
