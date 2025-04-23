@@ -1,9 +1,9 @@
 // src/pages/DownloadPage.js
 import '../style.css';
 
-import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { useQuery, gql, useMutation } from '@apollo/client';
+import React, { useState } from 'react';
+import { useParams } from 'react-router-dom';
+import { useQuery, useMutation, gql } from '@apollo/client';
 import { decryptFile } from '../services/crypto';
 import './DownloadPage.css';
 
@@ -12,58 +12,43 @@ const GET_FILE_METADATA = gql`
     getFileMetadata(downloadId: $downloadId) {
       downloadId
       filename
-      originalFilename
       mimeType
       size
       iv
       salt
       expiresAt
-      maxDownloads
-      downloadCount
     }
   }
 `;
 
 const DOWNLOAD_FILE = gql`
-  query DownloadFile($downloadId: String!) {
-    downloadFile(downloadId: $downloadId) {
-      downloadId
-      filename
-      originalFilename
-      mimeType
-      size
-      iv
-      salt
-      content
+  mutation DownloadFile($downloadId: String!, $password: String!) {
+    downloadFile(downloadId: $downloadId, password: $password) {
+      success
+      message
+      file {
+        downloadId
+        filename
+        mimeType
+        data
+        iv
+        salt
+      }
     }
   }
 `;
 
 const DownloadPage = () => {
   const { downloadId } = useParams();
-  const navigate = useNavigate();
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  const [isDownloading, setIsDownloading] = useState(false);
-  const [fileMetadata, setFileMetadata] = useState(null);
+  const [downloading, setDownloading] = useState(false);
 
-  const { loading, error: queryError } = useQuery(GET_FILE_METADATA, {
-    variables: { downloadId },
-    onCompleted: (data) => {
-      if (data?.getFileMetadata) {
-        setFileMetadata(data.getFileMetadata);
-      }
-    },
-    onError: (error) => {
-      setError('Failed to fetch file information. The file may not exist or may have expired.');
-    }
+  const { loading: metadataLoading, data: metadataData } = useQuery(GET_FILE_METADATA, {
+    variables: { downloadId }
   });
 
-  const [downloadFile] = useMutation(DOWNLOAD_FILE, {
-    onError: (error) => {
-      setError(error.message);
-    }
-  });
+  const [downloadFileMutation] = useMutation(DOWNLOAD_FILE);
 
   const handleDownload = async () => {
     if (!password) {
@@ -72,114 +57,100 @@ const DownloadPage = () => {
     }
 
     try {
-      setIsDownloading(true);
+      setDownloading(true);
       setError('');
-      
-      // 获取文件数据
-      const { data } = await downloadFile({
-        variables: { downloadId }
+
+      const { data } = await downloadFileMutation({
+        variables: {
+          downloadId,
+          password
+        }
       });
 
-      if (!data || !data.downloadFile) {
-        throw new Error('文件不存在或已过期');
+      if (!data?.downloadFile?.success) {
+        throw new Error(data?.downloadFile?.message || '下载失败');
       }
 
-      const fileData = data.downloadFile;
+      const { file } = data.downloadFile;
       
       // 解密文件
-      const decryptedFile = await decryptFile({
-        encryptedContent: fileData.content,
-        iv: fileData.iv,
-        salt: fileData.salt,
-        password,
-        originalName: fileData.originalFilename,
-        mimeType: fileData.mimeType
+      const decryptedData = await decryptFile({
+        encryptedData: file.data,
+        iv: file.iv,
+        salt: file.salt,
+        password
       });
 
       // 创建下载链接
-      const blob = new Blob([decryptedFile], { type: fileData.mimeType });
-      const url = window.URL.createObjectURL(blob);
+      const blob = new Blob([decryptedData], { type: file.mimeType });
+      const url = URL.createObjectURL(blob);
       
       // 触发下载
       const a = document.createElement('a');
       a.href = url;
-      a.download = fileData.originalFilename;
+      a.download = file.filename;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       
       // 清理
-      window.URL.revokeObjectURL(url);
-      setDownloadSuccess(true);
+      URL.revokeObjectURL(url);
 
     } catch (error) {
-      console.error('Download error:', error);
-      setError(error.message || '下载失败，请重试');
+      console.error('下载错误:', error);
+      setError(error.message);
     } finally {
-      setIsDownloading(false);
+      setDownloading(false);
     }
   };
-  
-  if (loading) {
-    return (
-      <div className="download-page">
-        <div className="loading-container">
-          <div className="spinner"></div>
-          <p>Loading file information...</p>
-        </div>
-      </div>
-    );
-  }
-  
-  if (queryError || !fileMetadata) {
-    return (
-      <div className="download-page">
-        <div className="error-container">
-          <h2>File Not Found</h2>
-          <p>{error || 'The file you are looking for does not exist or may have expired.'}</p>
-          <button className="primary-button" onClick={() => navigate('/')}>
-            Return to Home
-          </button>
-        </div>
-      </div>
-    );
-  }
-  
+
   return (
     <div className="download-page">
-      <div className="download-container">
-        <h2>Download File</h2>
-        
+      <h2>文件下载</h2>
+      
+      {metadataLoading ? (
+        <div className="loading">加载中...</div>
+      ) : metadataData?.getFileMetadata ? (
         <div className="file-info">
-          <p><strong>Filename:</strong> {fileMetadata.filename}</p>
-          <p><strong>Size:</strong> {(fileMetadata.size / 1024 / 1024).toFixed(2)} MB</p>
-          <p><strong>Expires:</strong> {new Date(fileMetadata.expiresAt).toLocaleString()}</p>
+          <h3>文件信息</h3>
+          <p><strong>文件名:</strong> {metadataData.getFileMetadata.filename}</p>
+          <p><strong>大小:</strong> {(metadataData.getFileMetadata.size / 1024 / 1024).toFixed(2)} MB</p>
+          <p><strong>类型:</strong> {metadataData.getFileMetadata.mimeType}</p>
+          <p><strong>过期时间:</strong> {new Date(metadataData.getFileMetadata.expiresAt).toLocaleString()}</p>
         </div>
-        
-        <div className="password-input">
-          <label htmlFor="password">Enter Decryption Password:</label>
-              <input
+      ) : (
+        <div className="error-message">找不到文件信息</div>
+      )}
+      
+      <div className="password-section">
+        <div className="input-group">
+          <input
             type="password"
-            id="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-            placeholder="Enter the password provided by the sender"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="请输入解密密码"
+            disabled={downloading}
           />
-            </div>
-
-        {error && <div className="error-message">{error}</div>}
-
-            <button 
-          className="download-button"
-          onClick={handleDownload}
-          disabled={!password || isDownloading}
-        >
-          {isDownloading ? 'Downloading...' : 'Download & Decrypt'}
-            </button>
-        
-        <div className="security-note">
-          <p>This file is protected by end-to-end encryption. The server never sees your password or the file contents.</p>
+          <button 
+            onClick={handleDownload}
+            disabled={downloading || !password || !metadataData?.getFileMetadata}
+          >
+            {downloading ? '正在下载...' : '下载并解密'}
+          </button>
         </div>
+        
+        {downloading && (
+          <div className="download-status">
+            <div className="progress-message">正在处理文件，请稍候...</div>
+          </div>
+        )}
+        
+        {error && (
+          <div className="error-message">
+            <p>{error}</p>
+            <button onClick={() => setError('')}>清除错误</button>
+          </div>
+        )}
       </div>
     </div>
   );

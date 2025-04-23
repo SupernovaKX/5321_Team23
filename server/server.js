@@ -42,6 +42,20 @@ async function connectToDatabase() {
   }
 }
 
+/**
+ * 验证密码是否正确
+ * @param {string} inputPassword - 用户输入的密码
+ * @param {string} salt - 存储的盐值
+ * @param {string} hashedPassword - 存储的哈希密码
+ * @returns {boolean} - 验证结果
+ */
+function validatePassword(inputPassword, salt, hashedPassword) {
+  const hash = crypto.createHash('sha256');
+  hash.update(inputPassword + salt); // 使用输入的密码和盐生成哈希
+  const inputHashedPassword = hash.digest('hex');
+  return inputHashedPassword === hashedPassword;
+}
+
 // Add GraphQL schema and resolvers
 const typeDefs = `
   scalar Upload
@@ -56,7 +70,7 @@ const typeDefs = `
     expiresAt: String!
     maxDownloads: Int
     downloadCount: Int
-    data: String  # 添加用于传输文件数据的字段
+    data: String
   }
 
   type UploadFileResponse {
@@ -65,10 +79,16 @@ const typeDefs = `
     downloadId: String
   }
 
+  type DownloadFileResponse {
+    success: Boolean!
+    message: String!
+    file: File
+  }
+
   type Query {
     getFile(downloadId: String!): File
     getFileMetadata(downloadId: String!): File
-    downloadFile(downloadId: String!): File!  # 添加下载查询
+    downloadFile(downloadId: String!): File!
   }
 
   type Mutation {
@@ -82,6 +102,7 @@ const typeDefs = `
       maxDownloads: Int
       expiresIn: Int
     ): UploadFileResponse!
+    downloadFile(downloadId: String!, password: String!): DownloadFileResponse!
   }
 `;
 
@@ -102,113 +123,75 @@ const resolvers = {
       }
       return file;
     },
-    downloadFile: async (_, { downloadId }) => {
+    downloadFile: async (_, { downloadId, password }) => {
       try {
-        console.log('开始处理文件下载请求:', downloadId);
-        
-        // 从数据库获取文件信息
         const file = await db.collection('files').findOne({ downloadId });
         if (!file) {
           throw new Error('文件不存在');
         }
-
-        // 检查文件是否过期
-        if (new Date(file.expiresAt) < new Date()) {
+    
+        if (new Date() > new Date(file.expiresAt)) {
           throw new Error('文件已过期');
         }
-
-        // 检查下载次数限制
-        if (file.maxDownloads && file.downloadCount >= file.maxDownloads) {
-          throw new Error('已达到最大下载次数限制');
+    
+        // 验证密码
+        const isPasswordValid = validatePassword(password, file.salt, file.hashedPassword);
+        if (!isPasswordValid) {
+          throw new Error('密码错误');
         }
-
-        // 读取文件内容
-        const filePath = path.join(UPLOAD_DIR, downloadId);
+    
+        const filePath = path.join(process.env.UPLOAD_DIR || 'uploads', downloadId);
         if (!fs.existsSync(filePath)) {
-          throw new Error('文件不存在于存储系统中');
+          throw new Error('文件在存储中不存在');
         }
-
-        // 以 base64 格式读取文件
-        const fileData = fs.readFileSync(filePath);
-        const base64Data = fileData.toString('base64');
-
-        // 更新下载计数
-        await db.collection('files').updateOne(
-          { downloadId },
-          { $inc: { downloadCount: 1 } }
-        );
-
-        console.log('文件下载成功:', {
-          filename: file.filename,
-          size: fileData.length,
-          downloadCount: file.downloadCount + 1
-        });
-
-        // 返回文件信息和内容
+    
+        const fileData = fs.readFileSync(filePath, 'base64');
+    
         return {
-          ...file,
-          data: base64Data
+          success: true,
+          message: '下载成功',
+          file: {
+            downloadId: file.downloadId,
+            filename: file.filename,
+            mimeType: file.mimeType,
+            size: file.size,
+            iv: file.iv,
+            salt: file.salt,
+            expiresAt: file.expiresAt,
+            data: fileData
+          }
         };
-
       } catch (error) {
-        console.error('文件下载错误:', error);
-        throw new Error(`文件下载失败: ${error.message}`);
+        console.error('下载错误:', error);
+        return {
+          success: false,
+          message: error.message,
+          file: null
+        };
       }
     }
   },
   Mutation: {
     uploadFile: async (_, { file, originalFilename, mimeType, size, iv, salt, maxDownloads = 1, expiresIn = 604800 }) => {
       try {
-        console.log('Starting file upload:', {
-          originalFilename,
-          mimeType,
-          size,
-          hasIv: !!iv,
-          hasSalt: !!salt
-        });
-
         const { createReadStream } = await file;
-        
-        // Generate a unique download ID
+
         const downloadId = crypto.randomBytes(16).toString('hex');
-        console.log('Generated downloadId:', downloadId);
-        
-        // Create the file path
-        const filePath = path.join(UPLOAD_DIR, downloadId);
-        console.log('Saving file to:', filePath);
-        
-        // Create a write stream
+        const filePath = path.join(process.env.UPLOAD_DIR || 'uploads', downloadId);
+
         const writeStream = fs.createWriteStream(filePath);
-        
-        // Pipe the file stream to the write stream
         await new Promise((resolve, reject) => {
           createReadStream()
             .pipe(writeStream)
-            .on('finish', () => {
-              console.log('File written successfully');
-              resolve();
-            })
-            .on('error', (error) => {
-              console.error('Error writing file:', error);
-              reject(error);
-            });
+            .on('finish', resolve)
+            .on('error', reject);
         });
-        
-        // Verify file was written
-        if (!fs.existsSync(filePath)) {
-          throw new Error('File was not written to disk');
-        }
-        
-        const stats = fs.statSync(filePath);
-        console.log('File stats:', {
-          size: stats.size,
-          exists: true
-        });
-        
-        // Calculate expiration date
+
+        // 使用输入的盐生成哈希密码
+        const hashedPassword = crypto.createHash('sha256').update(salt).digest('hex');
+
         const expiresAt = new Date(Date.now() + expiresIn * 1000);
-        
-        // Save file metadata to database
+
         const newFile = {
           downloadId,
           filename: originalFilename,
@@ -216,32 +199,73 @@ const resolvers = {
           size,
           iv,
           salt,
+          hashedPassword, // 存储哈希密码
           maxDownloads,
           expiresAt,
           downloadCount: 0,
           createdAt: new Date()
         };
-        
-        console.log('Saving file metadata to database:', {
-          downloadId,
-          filename: originalFilename,
-          hasIv: !!iv,
-          hasSalt: !!salt
-        });
-        
+
         await db.collection('files').insertOne(newFile);
-        
+
         return {
           success: true,
-          message: 'File uploaded successfully',
+          message: '文件上传成功',
           downloadId
         };
       } catch (error) {
-        console.error('Upload error:', error);
+        console.error('上传错误:', error);
         return {
           success: false,
           message: error.message,
           downloadId: null
+        };
+      }
+    },
+    downloadFile: async (_, { downloadId, password }) => {
+      try {
+        const file = await db.collection('files').findOne({ downloadId });
+        if (!file) {
+          throw new Error('文件不存在');
+        }
+
+        if (new Date() > new Date(file.expiresAt)) {
+          throw new Error('文件已过期');
+        }
+
+        // 验证密码
+        const isPasswordValid = validatePassword(password, file.salt, file.hashedPassword);
+        if (!isPasswordValid) {
+          throw new Error('密码错误');
+        }
+
+        const filePath = path.join(process.env.UPLOAD_DIR || 'uploads', downloadId);
+        if (!fs.existsSync(filePath)) {
+          throw new Error('文件在存储中不存在');
+        }
+
+        const fileData = fs.readFileSync(filePath, 'base64');
+
+        return {
+          success: true,
+          message: '下载成功',
+          file: {
+            downloadId: file.downloadId,
+            filename: file.filename,
+            mimeType: file.mimeType,
+            size: file.size,
+            iv: file.iv,
+            salt: file.salt,
+            expiresAt: file.expiresAt,
+            data: fileData
+          }
+        };
+      } catch (error) {
+        console.error('下载错误:', error);
+        return {
+          success: false,
+          message: error.message,
+          file: null
         };
       }
     }
@@ -266,22 +290,19 @@ const DOWNLOAD_FILE = gql`
 const app = express();
 
 async function startServer() {
-  // Create Apollo Server instance
   const server = new ApolloServer({
     schema: makeExecutableSchema({ typeDefs, resolvers }),
     csrfPrevention: true,
     cache: 'bounded',
-    cors: false, // 让 express 处理 CORS
+    cors: false,
     formatError: (error) => {
       console.error('GraphQL Error:', error);
       return error;
     }
   });
 
-  // Start Apollo Server
   await server.start();
 
-  // Middleware configuration
   app.use(cors({
     origin: ['http://localhost:3000', 'http://localhost:4000'],
     credentials: true,
@@ -289,7 +310,6 @@ async function startServer() {
     allowedHeaders: ['Content-Type', 'Authorization', 'Apollo-Require-Preflight'],
   }));
 
-  // Add CSP headers
   app.use((req, res, next) => {
     res.setHeader(
       'Content-Security-Policy',
@@ -301,16 +321,14 @@ async function startServer() {
   app.use(express.json({ limit: '100mb' }));
   app.use(express.urlencoded({ limit: '100mb', extended: true }));
   
-  // File upload middleware
   app.use(graphqlUploadExpress({
-    maxFileSize: 100000000, // 100MB
+    maxFileSize: 100000000,
     maxFiles: 1,
-    maxFieldSize: 100000000, // 100MB
-    maxRequestSize: 100000000, // 100MB
+    maxFieldSize: 100000000,
+    maxRequestSize: 100000000,
     uploadDir: UPLOAD_DIR
   }));
 
-  // GraphQL route
   app.use('/graphql', expressMiddleware(server, {
     context: async ({ req }) => {
       return {
@@ -320,21 +338,17 @@ async function startServer() {
     }
   }));
 
-  // Static file service (for file downloads)
   app.use('/uploads', express.static(UPLOAD_DIR));
 
-  // Example usage of the downloadFile query
   async function exampleDownloadFile(downloadId) {
     const { data } = await downloadFile({
       variables: { downloadId }
     });
 
-    // 解码文件数据
     const fileContent = atob(data.downloadFile.data);
     console.log('Decoded file content:', fileContent);
   }
 
-  // Start server
   app.listen(PORT, () => {
     console.log(`
       🚀 Server ready at http://localhost:${PORT}/graphql

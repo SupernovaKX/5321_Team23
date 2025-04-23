@@ -8,28 +8,30 @@ type File {
   id: ID!
   downloadId: String!
   filename: String!
-  originalFilename: String!
   mimeType: String!
   size: Int!
-  encryptedSize: Int!
   iv: String!  # Initialization vector for encryption
   salt: String!  # Salt used in encryption
-  createdAt: DateTime!
-  expiresAt: DateTime!
-  downloadCount: Int!
-  maxDownloads: Int
-  isExpired: Boolean!
-  content: String # 添加文件内容字段
+  expiresAt: String!
+  data: String  # 用于传输文件内容
 }
 
 """
-Upload response type
+Download response type
 """
-type UploadResponse {
+type DownloadResponse {
   success: Boolean!
   message: String
   file: File
-  downloadId: String!
+}
+
+"""
+Upload file response type
+"""
+type UploadFileResponse {
+  success: Boolean!
+  message: String
+  fileId: ID
 }
 
 """
@@ -37,19 +39,9 @@ Query type
 """
 type Query {
   """
-  Download file
-  """
-  downloadFile(downloadId: String!): File
-  
-  """
   Get file metadata
   """
   getFileMetadata(downloadId: String!): File
-  
-  """
-  Get file list (optional, for management)
-  """
-  files: [File!]!
 }
 
 """
@@ -57,7 +49,7 @@ Mutation type
 """
 type Mutation {
   """
-  Upload encrypted file
+  Upload file
   """
   uploadFile(
     file: Upload!
@@ -67,19 +59,11 @@ type Mutation {
     iv: String!
     salt: String!
     maxDownloads: Int
-    expiresIn: Int = 604800  # Default 7 days
-  ): UploadResponse!
-  
+    expiresIn: Int
+  ): UploadFileResponse!
+
   """
-  Delete file
+  Download file
   """
-  deleteFile(downloadId: String!): Boolean!
-  
-  """
-  Extend file expiry
-  """
-  extendFileExpiry(
-    downloadId: String!
-    duration: Int!
-  ): File
+  downloadFile(downloadId: String!, password: String!): DownloadResponse!
 }
